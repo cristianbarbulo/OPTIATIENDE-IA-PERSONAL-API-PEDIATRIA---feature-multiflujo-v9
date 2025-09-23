@@ -736,7 +736,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             "accion_recomendada": "usar_agente_cero", 
             "detalles": {}
         }
-        else:
+    else:
         # Flujo normal - comandos explícitos o en flujo activo
         dominio = meta_resultado.get("dominio", "AGENDAMIENTO")
         datos_extraidos = meta_resultado.get("datos_extraidos", {})
@@ -3672,7 +3672,7 @@ def process_message_logic(author, messages_to_process):
                         estrategia = _obtener_estrategia(current_state, mensaje_enriquecido, history, {}, mensaje_completo_usuario, nuevo_contexto)
                         logger.info(f"[AGENTE_CERO] Pasando a departamento especializado")
                     
-                else:
+                    else:
                         # Solo respuesta conversacional directa (sin JSON)
                         respuesta_final = respuesta_cero
                         # CRÍTICO: Preservar author en contexto
