@@ -58,7 +58,7 @@ try:
     
     # NUEVO: Configuración del buffer de mensajes (tiempo de espera antes de procesar)
     # Por defecto 4.0 segundos, pero personalizable por cliente
-    BUFFER_WAIT_TIME = float(os.getenv("BUFFER_WAIT_TIME", "4.0"))
+    BUFFER_WAIT_TIME = float(os.getenv("BUFFER_WAIT_TIME", "1.0"))
     if BUFFER_WAIT_TIME < 0.5:
         logger.warning(f"BUFFER_WAIT_TIME muy bajo ({BUFFER_WAIT_TIME}s). Mínimo recomendado: 0.5s")
     elif BUFFER_WAIT_TIME > 10.0:
