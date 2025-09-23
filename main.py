@@ -1038,35 +1038,61 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         if _es_ack_breve(mensaje_completo_usuario):
             return _responder_ack_cortesia(detalles or {}, state_context)
         
-        # Para todo lo demás en agenda, mostrar turnos
+        # Para todo lo demás en agenda, verificar si necesita nueva búsqueda o mostrar existentes
         try:
-            return agendamiento_handler.mostrar_opciones_turnos(history, detalles or {}, state_context, mensaje_completo_usuario, author)
+            # CORRECCIÓN V10: Si hay nueva fecha en detalles, ejecutar nuevo triage en lugar de mostrar turnos existentes
+            detalles_actuales = detalles or {}
+            fecha_nueva = detalles_actuales.get('fecha_deseada')
+            fecha_actual_contexto = state_context.get('fecha_deseada')
+            
+            if fecha_nueva and fecha_nueva != fecha_actual_contexto:
+                logger.info(f"[WRAPPER_PREGUNTAR] Nueva fecha detectada: {fecha_nueva} (anterior: {fecha_actual_contexto}) - Ejecutando nuevo triage")
+                return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+            else:
+                # Mostrar turnos existentes
+                resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+                
+                # CORRECCIÓN V10: Si mostrar_opciones_turnos devuelve None (éxito), no continuar con fallback
+                if resultado is None:
+                    logger.info(f"[WRAPPER_PREGUNTAR] Turnos mostrados exitosamente - No usar fallback Agente Cero")
+                    return None, nuevo_state  # Mensaje interactivo enviado exitosamente
+                else:
+                    return resultado, nuevo_state
         except Exception as e:
             logger.error(f"[WRAPPER_PREGUNTAR] Error en agendamiento: {e}")
             return "Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA", state_context
 
-    # 3) RESTRICCIONES ACTIVAS O Sin flujo activo: usar Agente Cero conversacional
-    # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
+    # 3) Sin flujo activo o estado final: usar Agente Cero conversacional
+    logger.info(f"[WRAPPER_PREGUNTAR] Sin flujo activo - Usando Agente Cero conversacional")
+    
     author = state_context.get('author') if state_context else None
-    intencion = "restricciones_pago" if hay_restricciones_activas else "preguntar"
-    context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, intencion, author)
+    context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
 
-    # REEMPLAZO QUIRÚRGICO: Sin flujo activo - usar Agente Cero siempre
     respuesta_cero = _llamar_agente_cero_directo(history, context_info)
     
-    # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto  
+    # CORRECCIÓN CRÍTICA V10: Procesar respuesta del Agente Cero
     try:
         import utils
-        data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_sin_flujo") or {}
+        data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_final") or {}
         
-        # Si viene JSON con response_text, usar solo ese texto
-        if data_cero.get("response_text"):
+        # CASO 1: Agente Cero recomienda una acción específica
+        accion_recomendada = data_cero.get("accion_recomendada", "").strip()
+        if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
+            logger.info(f"[WRAPPER_PREGUNTAR] Agente Cero recomienda acción: {accion_recomendada}")
+            
+            # Ejecutar la acción recomendada en lugar de devolver JSON
+            detalles_accion = data_cero.get("detalles", {})
+            return _ejecutar_accion(accion_recomendada, history, detalles_accion, state_context, mensaje_completo_usuario, author)
+        
+        # CASO 2: Respuesta conversacional con texto
+        elif data_cero.get("response_text"):
             respuesta_final = data_cero.get("response_text")
             logger.info(f"[WRAPPER_PREGUNTAR] Texto extraído del JSON: {respuesta_final[:100]}...")
         else:
-            # Si no hay response_text o no es JSON, usar respuesta directa
+            # CASO 3: Respuesta directa (no JSON)
             respuesta_final = respuesta_cero
             logger.info(f"[WRAPPER_PREGUNTAR] Usando respuesta directa: {respuesta_final[:100]}...")
+            
     except Exception as e:
         # Si falla el parsing, usar respuesta directa
         logger.info(f"[WRAPPER_PREGUNTAR] No es JSON o error parseando: {e}. Usando texto directo.")

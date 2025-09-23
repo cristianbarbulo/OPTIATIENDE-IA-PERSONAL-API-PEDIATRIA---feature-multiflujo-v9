@@ -366,15 +366,21 @@ def _extraer_datos_agendamiento(texto_usuario: str) -> dict:
     try:
         # Extraer fecha específica usando utils
         from utils import parsear_fecha_hora_natural
-        fecha_parseada, hora_parseada = parsear_fecha_hora_natural(texto_usuario)
+        resultado_parsing = parsear_fecha_hora_natural(texto_usuario)
         
-        if fecha_parseada:
-            datos['fecha_deseada'] = fecha_parseada
-            logger.info(f"[EXTRACCION] Fecha detectada: {fecha_parseada}")
-        
-        if hora_parseada:
-            datos['hora_especifica'] = hora_parseada
-            logger.info(f"[EXTRACCION] Hora detectada: {hora_parseada}")
+        # CORRECCIÓN V10: Manejar caso cuando parsear_fecha_hora_natural devuelve None
+        if resultado_parsing and isinstance(resultado_parsing, (tuple, list)) and len(resultado_parsing) >= 2:
+            fecha_parseada, hora_parseada = resultado_parsing[0], resultado_parsing[1]
+            
+            if fecha_parseada:
+                datos['fecha_deseada'] = fecha_parseada
+                logger.info(f"[EXTRACCION] Fecha detectada: {fecha_parseada}")
+            
+            if hora_parseada:
+                datos['hora_especifica'] = hora_parseada
+                logger.info(f"[EXTRACCION] Hora detectada: {hora_parseada}")
+        else:
+            logger.warning(f"[EXTRACCION] parsear_fecha_hora_natural devolvió: {resultado_parsing}")
         
         # Extraer preferencia horaria
         if any(p in texto for p in ["mañana", "temprano", "morning"]):
