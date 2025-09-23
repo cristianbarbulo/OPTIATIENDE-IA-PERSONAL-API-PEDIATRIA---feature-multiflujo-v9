@@ -165,6 +165,155 @@ def buscar_y_ofrecer_turnos(history, detalles, state_context=None, mensaje_compl
     
     return mostrar_opciones_turnos(history, detalles, state_context, mensaje_completo_usuario, author)
 
+def _mostrar_error_tecnico_con_botones(author, state_context, tipo_agenda="agendamiento"):
+    """
+    CORRECCIÓN V10: Mostrar error técnico con botones, nunca texto.
+    """
+    import msgio_handler
+    
+    if tipo_agenda == "reprogramación":
+        mensaje = "⚠️ **Error técnico en reprogramación**\n\nTengo problemas para obtener los turnos. ¿Qué querés hacer?"
+    else:
+        mensaje = "⚠️ **Error técnico**\n\nTengo problemas para obtener los turnos disponibles. ¿Qué querés hacer?"
+    
+    # Crear botones de opciones
+    botones = [
+        {"id": "reintentar_turnos", "title": "🔄 Intentar de nuevo"},
+        {"id": "buscar_otra_fecha", "title": "📅 Buscar otra fecha"},
+        {"id": "salir_agenda", "title": "❌ Salir de agenda"}
+    ]
+    
+    success = msgio_handler.send_whatsapp_message(
+        phone_number=author,
+        message=mensaje,
+        buttons=botones
+    )
+    
+    if success:
+        return None, state_context
+    else:
+        logger.error(f"[ERROR_TECNICO] Error enviando botones para {author}")
+        state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
+        return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+
+def _mostrar_solicitud_identificacion_cita_con_botones(author, state_context):
+    """
+    CORRECCIÓN V10: Solicitar identificación de cita con botones, nunca texto.
+    """
+    import msgio_handler
+    
+    mensaje = "❓ **Para cancelar tu cita necesito identificarla**\n\n¿Qué información podés darme?"
+    
+    # Crear botones de opciones
+    botones = [
+        {"id": "fecha_cita", "title": "📅 Decir fecha de la cita"},
+        {"id": "buscar_citas", "title": "🔍 Buscar mis citas"},
+        {"id": "salir_agenda", "title": "❌ Salir de agenda"}
+    ]
+    
+    success = msgio_handler.send_whatsapp_message(
+        phone_number=author,
+        message=mensaje,
+        buttons=botones
+    )
+    
+    if success:
+        return None, state_context
+    else:
+        logger.error(f"[SOLICITUD_ID_CITA] Error enviando botones para {author}")
+        state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
+        return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+
+def _mostrar_confirmacion_cancelacion_con_botones(author, state_context):
+    """
+    CORRECCIÓN V10: Mostrar confirmación de cancelación con botones, nunca texto.
+    """
+    import msgio_handler
+    
+    mensaje = "⚠️ **Confirmación de cancelación**\n\n¿Estás seguro de que querés cancelar tu cita?"
+    
+    # Crear botones de confirmación
+    botones = [
+        {"id": "cancelar_cita_si", "title": "✅ Sí, cancelar"},
+        {"id": "cancelar_cita_no", "title": "❌ No, mantener cita"}
+    ]
+    
+    success = msgio_handler.send_whatsapp_message(
+        phone_number=author,
+        message=mensaje,
+        buttons=botones
+    )
+    
+    if success:
+        return None, state_context
+    else:
+        logger.error(f"[CONFIRMACION_CANCELACION] Error enviando botones para {author}")
+        state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
+        return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+
+def _mostrar_no_turnos_disponibles_con_botones(author, state_context, tipo_agenda="agendamiento"):
+    """
+    CORRECCIÓN V10: Mostrar "no hay turnos" con botones, nunca texto.
+    """
+    import msgio_handler
+    
+    if tipo_agenda == "reprogramación":
+        mensaje = "❌ **No hay turnos disponibles para reprogramación**\n\n¿Qué querés hacer?"
+    else:
+        mensaje = "❌ **No hay turnos disponibles**\n\nEn los próximos días no encontré turnos libres. ¿Qué querés hacer?"
+    
+    # Crear botones de opciones
+    botones = [
+        {"id": "buscar_otra_fecha", "title": "📅 Buscar en otra fecha"},
+        {"id": "preferencia_horario", "title": "⏰ Especificar horario"},
+        {"id": "salir_agenda", "title": "❌ Salir de agenda"}
+    ]
+    
+    success = msgio_handler.send_whatsapp_message(
+        phone_number=author,
+        message=mensaje,
+        buttons=botones
+    )
+    
+    if success:
+        return None, state_context  # No devolver texto adicional
+    else:
+        # Fallback: mantener en agenda con mensaje educativo
+        logger.error(f"[NO_TURNOS] Error enviando botones para {author}")
+        state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
+        return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+
+def _mostrar_confirmacion_turno_con_botones(slot_seleccionado, state_context, author):
+    """
+    CORRECCIÓN V10: Mostrar confirmación de turno con botones, nunca texto.
+    """
+    import msgio_handler
+    
+    fecha_formateada = slot_seleccionado.get('fecha_formateada', 'Turno seleccionado')
+    
+    mensaje = f"✅ **Turno seleccionado:**\n{fecha_formateada}\n\n¿Confirmas este turno?"
+    
+    # Crear botones de confirmación
+    botones = [
+        {"id": "confirmar_turno_si", "title": "✅ Sí, confirmar"},
+        {"id": "confirmar_turno_no", "title": "❌ No, elegir otro"}
+    ]
+    
+    success = msgio_handler.send_whatsapp_message(
+        phone_number=author,
+        message=mensaje,
+        buttons=botones
+    )
+    
+    if success:
+        return None, state_context  # No devolver texto adicional
+    else:
+        # Fallback: volver a mostrar opciones
+        logger.error(f"[CONFIRMACION_TURNO] Error enviando botones para {author}")
+        # Importar la función sin referencias circulares
+        from agendamiento_handler import mostrar_opciones_turnos
+        return mostrar_opciones_turnos([], {}, state_context, "", author)
+
 def confirmar_agendamiento(history, state_context, user_choice):
     """
     NUEVO: Función para confirmar agendamiento (compatibilidad con wrapper).
@@ -185,9 +334,13 @@ def confirmar_agendamiento(history, state_context, user_choice):
             state_context['slot_seleccionado'] = slot_seleccionado
             state_context['current_state'] = 'AGENDA_CONFIRMANDO_TURNO'
             
-            return f"Perfecto, seleccionaste el turno: {slot_seleccionado.get('fecha_formateada', 'Turno')}. ¿Confirmas?", state_context
+            # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+            # Mostrar confirmación con botones Sí/No
+            return _mostrar_confirmacion_turno_con_botones(slot_seleccionado, state_context, author)
         else:
-            return f"Por favor, selecciona un número entre 1 y {len(available_slots)}.", state_context
+            # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO  
+            # Si selección inválida, volver a mostrar turnos con botones
+            return mostrar_opciones_turnos(history, detalles, state_context, mensaje_completo_usuario, author)
     except ValueError:
         # NUEVA MEJORA CRÍTICA: Si no es un ID válido, devolver None para que Meta Agente clasifique
         logger.info(f"[CONFIRMAR_AGENDA] Mensaje no es ID válido, devolviendo None para clasificación: {user_choice}")
@@ -282,8 +435,10 @@ def confirmar_reprogramacion(history, state_context, user_choice):
         # Ejecutar directamente la reprogramación
         return ejecutar_reprogramacion_cita(history, {}, state_context, user_choice)
     else:
-        state_context['current_state'] = 'preguntando'
-        return "Entendido, cancelo la reprogramación. ¿En qué más puedo ayudarte?", state_context
+        # CORRECCIÓN V10: NO cambiar estado, mantener flujo de agenda
+        # Usuario debe usar "SALIR DE AGENDA" para salir del flujo
+        state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'  
+        return "Reprogramación cancelada. Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
 
 def ejecutar_reprogramacion_cita(history, detalles, state_context=None, mensaje_completo_usuario=None, author=None):
     """
@@ -383,10 +538,12 @@ def mostrar_opciones_turnos_reprogramacion(history, detalles, state_context=None
         except Exception as e2:
             logger.error(f"[MOSTRAR_TURNOS_REPROG] Error catastrófico obteniendo turnos: {e2}")
             # NUEVA MEJORA: Mensaje genérico para el usuario sin exponer errores internos
-            return "Disculpa, estoy teniendo problemas para obtener los turnos disponibles para la reprogramación. ¿Podrías intentar de nuevo en unos minutos?", state_context
+            # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+            return _mostrar_error_tecnico_con_botones(author, state_context, "reprogramación")
     
     if not available_slots:
-        return "Lo siento, no hay turnos disponibles para la reprogramación en este momento. ¿Te gustaría que busque en otra fecha?", state_context
+        # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+        return _mostrar_no_turnos_disponibles_con_botones(author, state_context, "reprogramación")
     
     # Guardar slots en el contexto para uso posterior
     state_context['available_slots'] = available_slots
@@ -550,14 +707,16 @@ def iniciar_cancelacion_cita(history, detalles, state_context=None, mensaje_comp
     if not last_event_id:
         logger.warning(f"[CANCELACION] No se pudo identificar la cita a cancelar")
         state_context['current_state'] = 'AGENDA_CANCELACION_SOLICITANDO_IDENTIFICACION'
-        return "Para cancelar tu cita, necesito saber cuál es. ¿Podrías decirme cuándo tienes la cita que quieres cancelar?", state_context
+        # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+        return _mostrar_solicitud_identificacion_cita_con_botones(author, state_context)
     
     # Guardar el last_event_id en el contexto
     state_context['last_event_id'] = last_event_id
     state_context['es_cancelacion'] = True
     state_context['current_state'] = 'AGENDA_CANCELACION_CONFIRMANDO'
     
-    return f"Perfecto, voy a cancelar tu cita. ¿Estás seguro de que quieres cancelarla?", state_context
+    # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+    return _mostrar_confirmacion_cancelacion_con_botones(author, state_context)
 
 def confirmar_cancelacion(history, state_context):
     """
@@ -583,9 +742,11 @@ def ejecutar_cancelacion_cita(history, detalles, state_context=None, mensaje_com
     # Aquí iría la lógica para ejecutar la cancelación
     # Por ahora, simulamos éxito
     state_context['cita_cancelada'] = True
-    state_context['current_state'] = 'preguntando'
+    # CORRECCIÓN V10: NO cambiar estado, mantener flujo de agenda  
+    # Usuario debe usar "SALIR DE AGENDA" para salir del flujo
+    state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
     
-    return "Tu cita ha sido cancelada exitosamente. Si necesitas reagendar, no dudes en decírmelo.", state_context
+    return "Tu cita ha sido cancelada exitosamente. Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
 
 def reanudar_agendamiento(history, detalles, state_context=None, mensaje_completo_usuario=None, author=None):
     """
@@ -684,7 +845,8 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
         except Exception as e2:
             logger.error(f"[MOSTRAR_TURNOS] Error catastrófico obteniendo turnos: {e2}")
             # NUEVA MEJORA: Mensaje genérico para el usuario sin exponer errores internos
-            return "Disculpa, estoy teniendo problemas para obtener los turnos disponibles. ¿Podrías intentar de nuevo en unos minutos?", state_context
+            # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+            return _mostrar_error_tecnico_con_botones(author, state_context, "agendamiento")
     
     # NUEVO: Fallback automático si hoy no tiene cupos → buscar próximos días
     if not available_slots:
@@ -698,7 +860,8 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
             available_slots = []
     
     if not available_slots:
-        return "No hay turnos disponibles en los próximos días. Si querés, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco lo más cercano.", state_context
+        # CORRECCIÓN V10: SIEMPRE BOTONES, NUNCA TEXTO
+        return _mostrar_no_turnos_disponibles_con_botones(author, state_context, "agendamiento")
     
     # PLAN DE ACCIÓN: Guardar información crítica para el flujo de confirmación
     state_context['available_slots'] = available_slots

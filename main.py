@@ -544,11 +544,10 @@ def _procesar_multimedia_instantaneo(author, media_messages, state_context=None)
                                 state_context['requires_payment_first'] = False
                                 state_context['blocked_action'] = None
                                 
-                                # NUEVO: Actualizar estado para salir del flujo de pagos
-                                current_state = state_context.get('current_state', '')
-                                if current_state.startswith('PAGOS_'):
-                                    state_context['current_state'] = 'conversando'
-                                    logger.info(f"[PAGO_VERIFICADO] 🔄 Estado actualizado de '{current_state}' a 'conversando'")
+                                # CORRECCIÓN V10: NO cambiar estado automáticamente
+                                # El usuario debe usar "SALIR DE PAGO" para cambiar estado
+                                # Solo marcar pago como verificado, mantener flujo actual
+                                logger.info(f"[PAGO_VERIFICADO] ✅ Pago verificado pero manteniendo flujo actual para comandos explícitos")
                                 
                                 logger.info(f"[PAGO_VERIFICADO] ✅ Pago registrado automáticamente: ${monto_numerico:,} para {author}")
                                 logger.info(f"[PAGO_VERIFICADO] 🔓 Restricciones de pago removidas para {author}")
@@ -688,9 +687,10 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             # Asegurar que nunca quede marcado como pasado a departamento
             if isinstance(state_context, dict):
                 state_context['pasado_a_departamento'] = False
-                # Mantener estado conversacional simple
+                # CORRECCIÓN V10: NO forzar 'conversando', respetar estado actual
+                # Solo inicializar si no hay estado (nuevo usuario)
                 if not state_context.get('current_state'):
-                    state_context['current_state'] = 'conversando'
+                    state_context['current_state'] = 'inicial'
             # Estrategia: solo 'preguntar'
             return {"detalles": {}, "accion_recomendada": "preguntar"}
     except Exception:
