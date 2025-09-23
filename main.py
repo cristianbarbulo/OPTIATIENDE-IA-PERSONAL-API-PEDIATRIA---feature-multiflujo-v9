@@ -884,44 +884,45 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # Si algo falla, continuar con lógica general, pero no enviar textos rígidos
         pass
 
-    # Señales de flujo activo de AGENDA o PAGOS
+    # LÓGICA SIMPLIFICADA V10: Solo usar current_state para detectar flujos activos
     current_state_sc = state_context.get('current_state', '') or ''
     
-    # NUEVO: Si el pago ya está verificado, NO considerar PAGOS como activo
-    # para permitir que el meta-agente dirija correctamente a AGENDAMIENTO
-    pago_ya_verificado = state_context.get('payment_verified', False)
+    # SISTEMA SIMPLIFICADO: Solo current_state determina flujos activos
+    hay_pagos_activo = current_state_sc.startswith('PAGOS_')
+    hay_agenda_activa = current_state_sc.startswith('AGENDA_')
     
-    hay_pagos_activo = (
-        not pago_ya_verificado and (  # Solo si NO hay pago verificado
-            current_state_sc.startswith('PAGOS_')
-            or 'servicio_seleccionado_id' in state_context
-            or 'estado_pago' in state_context
-        )
-    )
-    # Importante: si estamos en PAGOS, priorizar ese flujo aunque queden restos del contexto de AGENDA
-    # NUEVO: No considerar agenda activa si hay restricciones de pago pendientes
+    # Restricciones solo para información, no afectan detección de flujos
     hay_restricciones_activas = (
         state_context.get('requires_payment_first') or 
         state_context.get('payment_restriction_active') or
         state_context.get('blocked_action')
     )
     
-    hay_agenda_activa = (
-        not hay_pagos_activo and 
-        not hay_restricciones_activas and (
-            current_state_sc.startswith('AGENDA_')
-            or bool(state_context.get('available_slots'))
-            or bool(state_context.get('available_slots_sent'))
-        )
-    )
-
-    # Pista de dominio del meta-agente (si viene)
-    dominio_hint = None
-    try:
-        if isinstance(detalles, dict):
-            dominio_hint = detalles.get('dominio_sugerido')
-    except Exception:
-        dominio_hint = None
+    logger.info(f"[WRAPPER_PREGUNTAR] SIMPLIFICADO - current_state: {current_state_sc}")
+    logger.info(f"[WRAPPER_PREGUNTAR] hay_pagos_activo: {hay_pagos_activo}, hay_agenda_activa: {hay_agenda_activa}")
+    
+    # Si current_state = "conversando" → NO hay flujos activos, usar Agente Cero
+    if current_state_sc == 'conversando':
+        logger.info(f"[WRAPPER_PREGUNTAR] Estado 'conversando' - Usando Agente Cero directamente")
+        author = state_context.get('author') if state_context else None
+        context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
+        
+        respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+        
+        # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+        try:
+            import utils
+            data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_conversando") or {}
+            
+            # Si viene JSON con response_text, usar solo ese texto
+            if data_cero.get("response_text"):
+                respuesta_final = data_cero.get("response_text")
+            else:
+                respuesta_final = respuesta_cero
+        except Exception:
+            respuesta_final = respuesta_cero
+        
+        return respuesta_final, state_context
 
     def _es_pregunta_general(texto: str) -> bool:
         if not isinstance(texto, str):
@@ -929,43 +930,21 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         t = texto.lower()
         # Palabras de pregunta
         qw = ["qué", "que ", "cómo", "como ", "cuándo", "cuando ", "dónde", "donde ", "por qué", "porque", "cuál", "cual ", "quién", "quien ", "?", "¿"]
-        # Palabras claras de agendamiento/pagos (para excluir)
-        kw_agenda = ["turno", "cita", "agenda", "agendar", "fecha", "hora", "reprogram", "cancelar"]
-        kw_pagos = ["pagar", "pago", "abonar", "precio", "costo", "link de pago", "mercadopago", "paypal", "modo"]
         es_pregunta = any(w in t for w in qw)
-        toca_agenda_o_pagos = any(w in t for w in kw_agenda) or any(w in t for w in kw_pagos)
-        return es_pregunta and not toca_agenda_o_pagos
+        return es_pregunta
 
     def _es_ack_breve(texto: str) -> bool:
-        """Detecta confirmaciones sociales breves para no re-disparar listas/botones.
-        Criterios: texto muy corto (<= 16 chars), sin palabras clave de agenda/pagos
-        y perteneciente a un set de acknowledgements comunes.
-        """
+        """Detecta confirmaciones sociales breves."""
         if not isinstance(texto, str):
             return False
         t = texto.strip().lower()
-        if not t:
-            return False
-        # Normalizar espacios y quitar signos triviales
-        import re as _re
-        t_clean = _re.sub(r"[\s\.!¡\?¿,;:~\-_*]+", " ", t).strip()
-        # Evitar colisiones con términos de negocio
-        kw_negocio = [
-            "pagar", "pago", "abonar", "precio", "costo", "link", "mercado", "paypal", "modo",
-            "turno", "cita", "agendar", "fecha", "hora", "reprogram", "cancelar"
-        ]
-        if any(k in t_clean for k in kw_negocio):
-            return False
-        if len(t_clean) > 16:
+        if not t or len(t) > 16:
             return False
         acks = {
             "ok", "oka", "okey", "okk", "dale", "listo", "gracias", "muchas gracias",
-            "perfecto", "genial", "bien", "entendido", "anotado", "vale", "va", "sip", "sí", "si",
-            "+1", "👍", "👌", "👎", "👍🏻", "👍🏽", "👍🏿"
+            "perfecto", "genial", "bien", "entendido", "anotado", "vale", "va", "sip", "sí", "si"
         }
-        # También aceptar si es solo un emoji de pulgar u OK
-        solo_emoji = _re.fullmatch(r"[\W_]+", t)
-        return t_clean in acks or bool(solo_emoji)
+        return t in acks
 
     def _responder_ack_cortesia(detalles_locales: dict, sc: dict) -> tuple[str, dict]:
         """Usa el Agente Cero para una cortesía breve."""
@@ -994,59 +973,6 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         except Exception:
             # Ante cualquier fallo, silencio elegante
             return "", sc
-
-    # Permitir cambio explícito a AGENDA si el usuario lo pide, aunque haya PAGOS activo
-    texto_lower = (mensaje_completo_usuario or "").lower()
-    kw_switch_agenda = ["reprogram", "reprogramar", "cambiar turno", "modificar cita", "agendar", "turno", "cita"]
-    if any(kw in texto_lower for kw in kw_switch_agenda):
-        hay_pagos_activo = False
-        hay_agenda_activa = True
-
-    # NUEVO: Si el Meta-Agente sugiere AGENDAMIENTO y el pago está verificado, verificar si ya tiene turno
-    if dominio_hint == 'AGENDAMIENTO' and pago_ya_verificado and 'agendamiento_handler' in globals():
-        # CORRECCIÓN CRÍTICA: Si ya tiene turno agendado, no mostrar automáticamente más turnos
-        # Debe quedarse conversacional y que el generador decida
-        ya_tiene_turno = (
-            state_context.get('slot_seleccionado') or
-            state_context.get('last_event_id') or
-            state_context.get('current_state') == 'evento_creado'
-        )
-        
-        if ya_tiene_turno:
-            logger.info(f"[WRAPPER_PREGUNTAR] Cliente ya tiene turno agendado - Manteniendo conversacional")
-            # Quedarse conversacional, no derivar automáticamente a agendamiento
-        else:
-            logger.info(f"[WRAPPER_PREGUNTAR] Meta-agente sugiere AGENDAMIENTO con pago verificado - Derivando a agendamiento")
-            return agendamiento_handler.iniciar_triage_agendamiento(history, detalles or {}, state_context, mensaje_completo_usuario, author)
-    
-    # Cambio quirúrgico: si el Meta-Agente sugiere AGENDAMIENTO y el texto contiene señales claras de agenda,
-    # o si los detalles ya traen entidades de agenda (fecha/hora), pivotar aunque haya un estado activo de PAGOS.
-    try:
-        texto_lower = (mensaje_completo_usuario or "").lower()
-        kw_switch_agenda_ext = ["reprogram", "reprogramar", "cambiar turno", "modificar cita", "agendar", "turno", "cita", "fecha", "hora", "disponible", "horario"]
-        detalles_indican_agenda = False
-        try:
-            if isinstance(detalles, dict) and (detalles.get('fecha_deseada') or detalles.get('hora_especifica') or detalles.get('preferencia_horaria')):
-                detalles_indican_agenda = True
-        except Exception:
-            detalles_indican_agenda = False
-
-        if hay_pagos_activo and dominio_hint == 'AGENDAMIENTO' and (
-            any(kw in texto_lower for kw in kw_switch_agenda_ext) or detalles_indican_agenda
-        ) and 'agendamiento_handler' in globals():
-            # CORRECCIÓN CRÍTICA: También verificar aquí si ya tiene turno agendado
-            ya_tiene_turno = (
-                state_context.get('slot_seleccionado') or
-                state_context.get('last_event_id') or
-                state_context.get('current_state') == 'evento_creado'
-            )
-            
-            if not ya_tiene_turno:
-                return agendamiento_handler.iniciar_triage_agendamiento(history, detalles or {}, state_context, mensaje_completo_usuario, author)
-            else:
-                logger.info(f"[WRAPPER_PREGUNTAR] Cliente ya tiene turno agendado - Manteniendo conversacional en segundo caso")
-    except Exception:
-        pass
 
     # 1) PAGOS: reanudar flujo o volver a listar servicios, sin generador (prioritario)
     if hay_pagos_activo and 'pago_handler' in globals():
@@ -1085,26 +1011,20 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             # Si algo falla, continuar hacia generador como último recurso
             pass
 
-    # 2) AGENDA: reofrecer turnos con extracción, sin generador
+    # 2) AGENDA: flujo activo de agendamiento
     if hay_agenda_activa and 'agendamiento_handler' in globals():
-        # Si es un agradecimiento/ack breve, responder con cortesía (o silencio) y NO reofrecer turnos
-        if _es_ack_breve(mensaje_completo_usuario):
-            return _responder_ack_cortesia(detalles or {}, state_context)
-        # Si es una pregunta general, responder con Agente Cero y mantener el flujo
+        logger.info(f"[WRAPPER_PREGUNTAR] Flujo AGENDA activo - Procesando en contexto de agendamiento")
+        
+        # Si es pregunta general, usar Agente Cero con contexto de agenda
         if _es_pregunta_general(mensaje_completo_usuario):
-            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
             author = state_context.get('author') if state_context else None
             context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
             
-            # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
             respuesta_cero = _llamar_agente_cero_directo(history, context_info)
             
-            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
             try:
                 import utils
                 data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_agenda") or {}
-                
-                # Si viene JSON con response_text, usar solo ese texto
                 if data_cero.get("response_text"):
                     respuesta_final = data_cero.get("response_text")
                 else:
@@ -1113,35 +1033,17 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                 respuesta_final = respuesta_cero
             
             return respuesta_final, state_context
-        # NUEVO: Si hay restricciones activas, NO llamar a buscar_y_ofrecer_turnos
-        # CORRECCIÓN: También verificar si ya tiene turno agendado para no ofrecer más turnos
-        ya_tiene_turno_confirmado = (
-            state_context.get('slot_seleccionado') or
-            state_context.get('last_event_id') or
-            state_context.get('current_state') == 'evento_creado'
-        )
         
-        # Si ya tiene turno confirmado, cambiar estado a conversacional
-        if ya_tiene_turno_confirmado and state_context.get('current_state', '').startswith('AGENDA_'):
-            state_context['current_state'] = 'conversando'
-            logger.info(f"[WRAPPER_PREGUNTAR] Cliente ya tiene turno - Cambiando estado a conversando")
+        # Si es cortesía breve, responder breve
+        if _es_ack_breve(mensaje_completo_usuario):
+            return _responder_ack_cortesia(detalles or {}, state_context)
         
-        if not hay_restricciones_activas and not ya_tiene_turno_confirmado:
-            try:
-                # Forzar búsqueda inteligente de turnos con posible extracción de fecha/hora del mensaje actual
-                detalles_locales = detalles.copy() if isinstance(detalles, dict) else {}
-                respuesta_busqueda, contexto_busqueda = agendamiento_handler.buscar_y_ofrecer_turnos(
-                    history=history,
-                    detalles=detalles_locales,
-                    state_context=state_context,
-                    mensaje_completo_usuario=mensaje_completo_usuario,
-                    author=author,
-                )
-                # Respuesta normal, retornar (las restricciones se manejan centralizadamente)
-                return respuesta_busqueda, contexto_busqueda
-            except Exception:
-                # Si algo falla, continuar hacia generador como último recurso
-                pass
+        # Para todo lo demás en agenda, mostrar turnos
+        try:
+            return agendamiento_handler.mostrar_opciones_turnos(history, detalles or {}, state_context, mensaje_completo_usuario, author)
+        except Exception as e:
+            logger.error(f"[WRAPPER_PREGUNTAR] Error en agendamiento: {e}")
+            return "Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA", state_context
 
     # 3) RESTRICCIONES ACTIVAS O Sin flujo activo: usar Agente Cero conversacional
     # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
