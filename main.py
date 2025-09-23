@@ -3523,8 +3523,12 @@ def process_message_logic(author, messages_to_process):
                 mensaje_enriquecido = f"Contexto: {estado_actual}. Usuario: '{mensaje_completo_usuario}'"
                 estrategia = _obtener_estrategia(estado_actual, mensaje_enriquecido, history, {}, mensaje_completo_usuario, state_context)
             else:
+                # VERIFICACIÓN CRÍTICA: Si author es None desde el inicio, no continuar
+                if not author:
+                    logger.error(f"[AGENTE_CERO] Author es None desde inicio - abortando procesamiento")
+                    return
+                
                 # SIMPLIFICACIÓN CRÍTICA: Usar Agente Cero híbrido que puede recomendar acciones
-                author = state_context.get('author') if state_context else None
                 context_info = _construir_context_info_completo(None, state_context, mensaje_completo_usuario, "decidir_flujo", author)
                 
                 respuesta_cero = _llamar_agente_cero_directo(history, context_info)
@@ -3533,8 +3537,9 @@ def process_message_logic(author, messages_to_process):
                 try:
                     import utils
                     data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="agente_cero_hibrido") or {}
-                    accion_recomendada = data_cero.get("accion_recomendada", "").strip()
                     
+                    # CASO 1: Agente Cero recomienda una acción específica
+                    accion_recomendada = data_cero.get("accion_recomendada", "").strip()
                     if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
                         # El Agente Cero recomienda una acción - ejecutarla
                         detalles_cero = data_cero.get("detalles", {})
@@ -3546,15 +3551,50 @@ def process_message_logic(author, messages_to_process):
                         }
                         # Actualizar pasado_a_departamento para el Meta-Agente
                         state_context['pasado_a_departamento'] = True
+                        # CRÍTICO: Asegurar que author se preserve
+                        if 'author' not in state_context and author:
+                            state_context['author'] = author
                         nuevo_contexto = state_context
+                    
+                    # CASO 2: Agente Cero retorna decision="RESPUESTA_GENERAL" 
+                    elif data_cero.get("decision") == "RESPUESTA_GENERAL":
+                        # CORRECCIÓN CRÍTICA: Usar response_text, no todo el JSON
+                        respuesta_final = data_cero.get("response_text", respuesta_cero)
+                        # CRÍTICO: Preservar author en contexto
+                        nuevo_contexto = state_context.copy() if state_context else {}
+                        if 'author' not in nuevo_contexto and author:
+                            nuevo_contexto['author'] = author
+                        logger.info(f"[AGENTE_CERO] Respuesta general detectada: {respuesta_final[:100]}...")
+                    
+                    # CASO 3: Agente Cero retorna decision="PASADO_A_DEPARTAMENTO"
+                    elif data_cero.get("decision") == "PASADO_A_DEPARTAMENTO":
+                        # Pasar al Meta-Agente como antes
+                        state_context['pasado_a_departamento'] = True
+                        # CRÍTICO: Asegurar que author se preserve
+                        if 'author' not in state_context and author:
+                            state_context['author'] = author
+                        nuevo_contexto = state_context
+                        mensaje_enriquecido = f"Contexto: {current_state}. Usuario: '{mensaje_completo_usuario}'"
+                        estrategia = _obtener_estrategia(current_state, mensaje_enriquecido, history, {}, mensaje_completo_usuario, nuevo_contexto)
+                        logger.info(f"[AGENTE_CERO] Pasando a departamento especializado")
+                    
                     else:
-                        # Solo respuesta conversacional
+                        # Solo respuesta conversacional directa (sin JSON)
                         respuesta_final = respuesta_cero
-                        nuevo_contexto = state_context
-                except Exception:
+                        # CRÍTICO: Preservar author en contexto
+                        nuevo_contexto = state_context.copy() if state_context else {}
+                        if 'author' not in nuevo_contexto and author:
+                            nuevo_contexto['author'] = author
+                        logger.info(f"[AGENTE_CERO] Respuesta conversacional directa")
+                        
+                except Exception as e:
                     # Si no hay JSON o falla parsing, usar como respuesta directa
+                    logger.warning(f"[AGENTE_CERO] Error parseando respuesta como JSON: {e}. Usando texto directo.")
                     respuesta_final = respuesta_cero
-                    nuevo_contexto = state_context
+                    # CRÍTICO: Preservar author en contexto
+                    nuevo_contexto = state_context.copy() if state_context else {}
+                    if 'author' not in nuevo_contexto and author:
+                        nuevo_contexto['author'] = author
 
         # 5. VERIFICACIÓN DE RESTRICCIONES ANTES DE EJECUTAR ACCIONES DE AGENDAMIENTO
         if respuesta_final is None and estrategia and estrategia.get("accion_recomendada"):
