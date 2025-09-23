@@ -1298,43 +1298,172 @@ Usuario → Agente Cero → Meta-Agente → Agente Intención → Handler → Ge
 Usuario → Agente Cero Híbrido → Meta-Agente Amplificado → Handler
 ```
 
-### Agente Cero Híbrido
+### Agente Cero Híbrido - UNIFICADO V10
 
-#### Ubicación en Código
+#### Ubicación en Código y Variable
 - **Archivo**: `main.py` línea 3003
 - **Función**: `_llamar_agente_cero_directo(history, context_info)`
+- **Variable de Render**: `PROMPT_AGENTE_CERO` (config.py línea 88)
+- **Función unificada**: Reemplaza `_agente_cero_decision()` anterior
 
-#### Responsabilidades Ampliadas
-1. **Conversación General**: Responde preguntas sin flujo activo
-2. **Educación de Comandos**: Enseña comandos explícitos al usuario  
-3. **Context_info Completo**: Recibe TODA la información del sistema
-4. **Educación Continua**: Guía al usuario sobre navegación
+#### Responsabilidades Híbridas (DOBLE CAPACIDAD)
+1. **Conversación General**: Responde preguntas directamente con texto
+2. **Recomendación de Acciones**: Puede recomendar acciones en JSON al Meta-Agente
+3. **Educación de Comandos**: Enseña comandos explícitos al usuario  
+4. **Context_info Completo**: Recibe TODA la información del sistema
+5. **Educación Continua**: Guía al usuario sobre navegación
 
-#### Context_info Completo que Recibe
+#### Comportamiento Híbrido UNIFICADO Implementado
+
+**DOBLE CAPACIDAD** - El Agente Cero puede hacer 2 cosas:
+
+##### 1. Respuesta Conversacional Directa (Texto)
 ```python
-# Función helper que GARANTIZA contexto completo:
+# Para saludos, preguntas generales, educación:
+"¡Hola! Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR"
+```
+
+##### 2. Recomendar Acciones al Sistema (JSON)
+```python  
+# Para intenciones específicas:
+{
+  "accion_recomendada": "iniciar_triage_agendamiento",
+  "detalles": {"fecha_deseada": "2025-01-16", "preferencia_horaria": "tarde"}
+}
+```
+
+#### Flujo de Procesamiento Híbrido
+```python
+# main.py líneas 3526-3557:
+
+# 1. SIEMPRE llama a Agente Cero ÚNICO con contexto completo
+context_info = _construir_context_info_completo(None, state_context, mensaje_completo_usuario, "decidir_flujo", author)
+respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+
+# 2. VERIFICA si retorna JSON con acción recomendada
+data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="agente_cero_hibrido")
+accion_recomendada = data_cero.get("accion_recomendada", "")
+
+# 3a. SI HAY ACCIÓN → Ejecuta directamente (evita Meta-Agente)
+if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
+    estrategia = {"accion_recomendada": accion_recomendada, "detalles": data_cero.get("detalles", {})}
+    # Va directo al handler correspondiente
+
+# 3b. SI NO HAY ACCIÓN → Respuesta conversacional directa  
+else:
+    respuesta_final = respuesta_cero  # Texto directo al usuario (sin más procesamiento)
+```
+
+#### Compatibilidad con ENABLED_AGENTS
+
+##### Cliente Solo Agendamiento (`ENABLED_AGENTS="scheduling"`)
+- ✅ Agente Cero puede recomendar: `iniciar_triage_agendamiento`, `iniciar_reprogramacion_cita`, `iniciar_cancelacion_cita`
+- ❌ NO recomienda acciones de pagos (no están en MAPA_DE_ACCIONES)
+- ✅ Educación: "Para agendar, escribí: QUIERO AGENDAR"
+
+##### Cliente Solo Pagos (`ENABLED_AGENTS="payment"`)
+- ✅ Agente Cero puede recomendar: `iniciar_triage_pagos`, `confirmar_pago`
+- ❌ NO recomienda acciones de agendamiento (no están en MAPA_DE_ACCIONES)
+- ✅ Educación: "Para ver servicios, escribí: QUIERO PAGAR"
+
+##### Cliente Solo Conversacional (`ENABLED_AGENTS=""`)
+- ✅ Solo respuestas texto conversacionales
+- ❌ Sin acciones de negocio disponibles
+- ✅ Funciona en modo puro Agente Cero (línea 844)
+
+#### Context_info Completo GARANTIZADO que Recibe
+
+El Agente Cero **SIEMPRE** recibe contexto completo a través de la función helper estandarizada:
+
+```python
+# main.py líneas 3026-3063:
 def _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, intencion, author):
+    """GARANTIZA que el Agente Cero SIEMPRE reciba TODA la información disponible"""
     context_info = {}
     
-    # 1. Datos del Meta-Agente
+    # 1. Datos del Meta-Agente (si vienen)
     if isinstance(detalles, dict):
         context_info.update(detalles)  # fecha_deseada, servicio_deseado, etc.
     
     # 2. Estado completo del usuario  
     if isinstance(state_context, dict):
-        context_info.update(state_context)  # available_slots, current_state, etc.
+        context_info.update(state_context)  # available_slots, current_state, vendor_owner, etc.
     
-    # 3. Vendor desde memoria
+    # 3. Información básica obligatoria
+    context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
+    context_info["intencion"] = intencion
+    
+    # 4. Vendor desde memoria (si no está en contexto)
     if "vendor_owner" not in context_info and author:
-        vendor = memory.get_vendor_owner(author)
-        if vendor:
-            context_info["vendor_owner"] = vendor
+        try:
+            vendor = memory.get_vendor_owner(author)
+            if vendor:
+                context_info["vendor_owner"] = vendor
+        except Exception:
+            pass
     
-    # 4. Enriquecimiento del sistema
-    _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
+    # 5. CRÍTICO: Enriquecimiento completo del sistema
+    try:
+        current_state_sc = state_context.get('current_state', '') if state_context else ''
+        _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
+        # Agrega: estado_agenda, estado_pago, horarios_disponibles, link_pago, etc.
+    except Exception as e:
+        logger.warning(f"[CONTEXT_INFO] Error enriqueciendo contexto: {e}")
     
+    # 6. Logging de qué se incluye
+    logger.info(f"[CONTEXT_INFO] Context_info completo construido: {list(context_info.keys())}")
     return context_info
 ```
+
+#### Variable de Render: PROMPT_AGENTE_CERO
+
+**Ubicación en código:**
+- **config.py línea 88**: `PROMPT_AGENTE_CERO = os.environ['PROMPT_AGENTE_CERO']`
+- **main.py línea 3021**: `{config.PROMPT_AGENTE_CERO}` - Siempre desde variable
+
+**Configuración por Tipo de Cliente:**
+
+##### Cliente Completo (Agendamiento + Pagos)
+```bash
+ENABLED_AGENTS="payment,scheduling"
+PROMPT_AGENTE_CERO="Eres el Agente Cero Híbrido del sistema completo. Capacidad dual: respuesta directa O recomendación de acciones. 
+
+ACCIONES DISPONIBLES: iniciar_triage_agendamiento, iniciar_triage_pagos, iniciar_reprogramacion_cita, iniciar_cancelacion_cita, confirmar_pago, preguntar, escalar_a_humano.
+
+COMANDOS: Para agendar escribí QUIERO AGENDAR. Para pagos escribí QUIERO PAGAR. Para salir SALIR DE AGENDA/PAGO.
+
+Responde con texto conversacional O JSON con acción según corresponda."
+```
+
+##### Cliente Solo Agendamiento
+```bash
+ENABLED_AGENTS="scheduling"
+PROMPT_AGENTE_CERO="Eres el Agente Cero especializado en agendamiento. Capacidad dual: respuesta directa O recomendación de acciones.
+
+ACCIONES DISPONIBLES: iniciar_triage_agendamiento, iniciar_reprogramacion_cita, iniciar_cancelacion_cita, preguntar, escalar_a_humano.
+
+COMANDOS: Para agendar escribí QUIERO AGENDAR. Para salir escribí SALIR DE AGENDA.
+
+Responde con texto conversacional O JSON con acción según corresponda."
+```
+
+##### Cliente Solo Pagos
+```bash
+ENABLED_AGENTS="payment"
+PROMPT_AGENTE_CERO="Eres el Agente Cero especializado en servicios y pagos. Capacidad dual: respuesta directa O recomendación de acciones.
+
+ACCIONES DISPONIBLES: iniciar_triage_pagos, confirmar_pago, preguntar, escalar_a_humano.
+
+COMANDOS: Para ver servicios escribí QUIERO PAGAR. Para salir escribí SALIR DE PAGO.
+
+Responde con texto conversacional O JSON con acción según corresponda."
+```
+
+#### 12 Llamadas Estandarizadas que Usan Context_info Completo
+- ✅ **8 llamadas en main.py** - Todas usan `_construir_context_info_completo()`
+- ✅ **4 llamadas en pago_handler.py** - Todas usan `_construir_context_info_completo()`
+- ✅ **TODAS** reciben historial completo como parámetro `history`
+- ✅ **TODAS** usan `config.PROMPT_AGENTE_CERO` desde variable de entorno
 
 #### Información Garantizada en Cada Llamada
 ```python

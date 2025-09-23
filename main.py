@@ -3523,17 +3523,38 @@ def process_message_logic(author, messages_to_process):
                 mensaje_enriquecido = f"Contexto: {estado_actual}. Usuario: '{mensaje_completo_usuario}'"
                 estrategia = _obtener_estrategia(estado_actual, mensaje_enriquecido, history, {}, mensaje_completo_usuario, state_context)
             else:
-                cero_resultado = _agente_cero_decision(mensaje_completo_usuario, history, state_context)
-                if cero_resultado['decision'] == 'RESPUESTA_GENERAL':
-                    respuesta_final = cero_resultado['response_text']
-                    nuevo_contexto = cero_resultado['state_context_updated']
-                else:
-                    nuevo_contexto = cero_resultado['state_context_updated']
-                    # IMPORTANTE: Usar el estado actualizado del contexto si fue modificado
-                    estado_actual = nuevo_contexto.get('current_state', current_state)
-                    memory.update_conversation_state(author, estado_actual, context=nuevo_contexto)
-                    mensaje_enriquecido = f"Contexto: {estado_actual}. Usuario: '{mensaje_completo_usuario}'"
-                    estrategia = _obtener_estrategia(estado_actual, mensaje_enriquecido, history, {}, mensaje_completo_usuario, nuevo_contexto)
+                # SIMPLIFICACIÓN CRÍTICA: Usar Agente Cero híbrido que puede recomendar acciones
+                author = state_context.get('author') if state_context else None
+                context_info = _construir_context_info_completo(None, state_context, mensaje_completo_usuario, "decidir_flujo", author)
+                
+                respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+                
+                # Verificar si el Agente Cero recomienda una acción
+                try:
+                    import utils
+                    data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="agente_cero_hibrido") or {}
+                    accion_recomendada = data_cero.get("accion_recomendada", "").strip()
+                    
+                    if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
+                        # El Agente Cero recomienda una acción - ejecutarla
+                        detalles_cero = data_cero.get("detalles", {})
+                        logger.info(f"[AGENTE_CERO] Acción recomendada: {accion_recomendada}")
+                        mensaje_enriquecido = f"Contexto: {current_state}. Usuario: '{mensaje_completo_usuario}'"
+                        estrategia = {
+                            "accion_recomendada": accion_recomendada,
+                            "detalles": detalles_cero
+                        }
+                        # Actualizar pasado_a_departamento para el Meta-Agente
+                        state_context['pasado_a_departamento'] = True
+                        nuevo_contexto = state_context
+                    else:
+                        # Solo respuesta conversacional
+                        respuesta_final = respuesta_cero
+                        nuevo_contexto = state_context
+                except Exception:
+                    # Si no hay JSON o falla parsing, usar como respuesta directa
+                    respuesta_final = respuesta_cero
+                    nuevo_contexto = state_context
 
         # 5. VERIFICACIÓN DE RESTRICCIONES ANTES DE EJECUTAR ACCIONES DE AGENDAMIENTO
         if respuesta_final is None and estrategia and estrategia.get("accion_recomendada"):
