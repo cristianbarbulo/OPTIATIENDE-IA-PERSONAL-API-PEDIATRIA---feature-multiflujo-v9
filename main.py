@@ -736,7 +736,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             "accion_recomendada": "usar_agente_cero", 
             "detalles": {}
         }
-    else:
+        else:
         # Flujo normal - comandos explícitos o en flujo activo
         dominio = meta_resultado.get("dominio", "AGENDAMIENTO")
         datos_extraidos = meta_resultado.get("datos_extraidos", {})
@@ -845,7 +845,21 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
             context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", state_context.get('author') if state_context else None)
             respuesta_cero = _llamar_agente_cero_directo(history, context_info)
-            return respuesta_cero, state_context
+            
+            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+            try:
+                import utils
+                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_solo_agente_cero") or {}
+                
+                # Si viene JSON con response_text, usar solo ese texto
+                if data_cero.get("response_text"):
+                    respuesta_final = data_cero.get("response_text")
+                else:
+                    respuesta_final = respuesta_cero
+            except Exception:
+                respuesta_final = respuesta_cero
+            
+            return respuesta_final, state_context
     except Exception:
         # Si algo falla, continuar con lógica general, pero no enviar textos rígidos
         pass
@@ -941,8 +955,22 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             context_info = _construir_context_info_completo(detalles_locales, sc, mensaje_completo_usuario, "cierre_cortesia", author)
             
             # REEMPLAZO QUIRÚRGICO: Usar Agente Cero con contexto completo
-            respuesta = _llamar_agente_cero_directo(history, context_info)
-            return respuesta, sc
+            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+            
+            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+            try:
+                import utils
+                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="responder_ack_cortesia") or {}
+                
+                # Si viene JSON con response_text, usar solo ese texto
+                if data_cero.get("response_text"):
+                    respuesta_final = data_cero.get("response_text")
+                else:
+                    respuesta_final = respuesta_cero
+            except Exception:
+                respuesta_final = respuesta_cero
+            
+            return respuesta_final, sc
         except Exception:
             # Ante cualquier fallo, silencio elegante
             return "", sc
@@ -1012,8 +1040,22 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
             
             # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
-            respuesta = _llamar_agente_cero_directo(history, context_info)
-            return respuesta, state_context
+            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+            
+            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+            try:
+                import utils
+                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_pagos") or {}
+                
+                # Si viene JSON con response_text, usar solo ese texto
+                if data_cero.get("response_text"):
+                    respuesta_final = data_cero.get("response_text")
+                else:
+                    respuesta_final = respuesta_cero
+            except Exception:
+                respuesta_final = respuesta_cero
+            
+            return respuesta_final, state_context
         try:
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
             if current_state_sc == 'PAGOS_ESPERANDO_CONFIRMACION':
@@ -1035,8 +1077,22 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
             
             # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
-            respuesta = _llamar_agente_cero_directo(history, context_info)
-            return respuesta, state_context
+            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+            
+            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+            try:
+                import utils
+                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_agenda") or {}
+                
+                # Si viene JSON con response_text, usar solo ese texto
+                if data_cero.get("response_text"):
+                    respuesta_final = data_cero.get("response_text")
+                else:
+                    respuesta_final = respuesta_cero
+            except Exception:
+                respuesta_final = respuesta_cero
+            
+            return respuesta_final, state_context
         # NUEVO: Si hay restricciones activas, NO llamar a buscar_y_ofrecer_turnos
         # CORRECCIÓN: También verificar si ya tiene turno agendado para no ofrecer más turnos
         ya_tiene_turno_confirmado = (
@@ -1074,8 +1130,27 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
     context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, intencion, author)
 
     # REEMPLAZO QUIRÚRGICO: Sin flujo activo - usar Agente Cero siempre
-    respuesta = _llamar_agente_cero_directo(history, context_info)
-    return respuesta, state_context
+    respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+    
+    # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto  
+    try:
+        import utils
+        data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_sin_flujo") or {}
+        
+        # Si viene JSON con response_text, usar solo ese texto
+        if data_cero.get("response_text"):
+            respuesta_final = data_cero.get("response_text")
+            logger.info(f"[WRAPPER_PREGUNTAR] Texto extraído del JSON: {respuesta_final[:100]}...")
+        else:
+            # Si no hay response_text o no es JSON, usar respuesta directa
+            respuesta_final = respuesta_cero
+            logger.info(f"[WRAPPER_PREGUNTAR] Usando respuesta directa: {respuesta_final[:100]}...")
+    except Exception as e:
+        # Si falla el parsing, usar respuesta directa
+        logger.info(f"[WRAPPER_PREGUNTAR] No es JSON o error parseando: {e}. Usando texto directo.")
+        respuesta_final = respuesta_cero
+    
+    return respuesta_final, state_context
 
 def _verificar_restricciones_pago(state_context: dict, author: str) -> dict | None:
     """
@@ -1480,8 +1555,27 @@ def wrapper_usar_agente_cero(history, detalles, state_context, mensaje_completo_
     context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "enseñar_comandos", author)
     
     # Llamar Agente Cero con contexto completo
-    respuesta = _llamar_agente_cero_directo(history, context_info)
-    return respuesta, state_context
+    respuesta_cero = _llamar_agente_cero_directo(history, context_info)
+    
+    # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+    try:
+        import utils
+        data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_usar_agente_cero") or {}
+        
+        # Si viene JSON con response_text, usar solo ese texto
+        if data_cero.get("response_text"):
+            respuesta_final = data_cero.get("response_text")
+            logger.info(f"[USAR_AGENTE_CERO] Texto extraído del JSON: {respuesta_final[:100]}...")
+        else:
+            # Si no hay response_text o no es JSON, usar respuesta directa
+            respuesta_final = respuesta_cero
+            logger.info(f"[USAR_AGENTE_CERO] Usando respuesta directa: {respuesta_final[:100]}...")
+    except Exception as e:
+        # Si falla el parsing, usar respuesta directa
+        logger.info(f"[USAR_AGENTE_CERO] No es JSON o error parseando: {e}. Usando texto directo.")
+        respuesta_final = respuesta_cero
+    
+    return respuesta_final, state_context
 
 MAPA_DE_ACCIONES = {
     # --- ACCIONES SIEMPRE DISPONIBLES ---
@@ -3578,7 +3672,7 @@ def process_message_logic(author, messages_to_process):
                         estrategia = _obtener_estrategia(current_state, mensaje_enriquecido, history, {}, mensaje_completo_usuario, nuevo_contexto)
                         logger.info(f"[AGENTE_CERO] Pasando a departamento especializado")
                     
-                    else:
+                else:
                         # Solo respuesta conversacional directa (sin JSON)
                         respuesta_final = respuesta_cero
                         # CRÍTICO: Preservar author en contexto
