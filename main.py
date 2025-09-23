@@ -802,7 +802,17 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
     logger.info(f"[EJECUTAR] Ejecutando acción: {accion} para {author}")
     if accion not in MAPA_DE_ACCIONES:
         logger.error(f"Acción '{accion}' no encontrada en MAPA_DE_ACCIONES.")
-        return "Disculpa, hubo un problema interno al procesar tu solicitud.", state_context
+        
+        # MENSAJE EDUCATIVO según el contexto actual
+        current_state = state_context.get('current_state', '') if state_context else ''
+        if current_state.startswith('PAGOS_'):
+            mensaje_educativo = "Estás en el flujo de pagos. Para salir, escribí: SALIR DE PAGO"
+        elif current_state.startswith('AGENDA_'):
+            mensaje_educativo = "Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA"
+        else:
+            mensaje_educativo = "Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR"
+        
+        return mensaje_educativo, state_context
     
     try:
         # ¡LA CORRECCIÓN MÁS IMPORTANTE!
@@ -818,7 +828,17 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
         return respuesta_final, nuevo_contexto
     except Exception as e:
         logger.error(f"Error catastrófico al ejecutar acción '{accion}': {e}", exc_info=True)
-        return "Lo siento, ocurrió un error inesperado al procesar tu solicitud. Por favor, intenta de nuevo.", state_context
+        
+        # MENSAJE EDUCATIVO según el contexto actual
+        current_state = state_context.get('current_state', '') if state_context else ''
+        if current_state.startswith('PAGOS_'):
+            mensaje_educativo = "Estoy teniendo problemas en el flujo de pagos. Para salir y volver al inicio, escribí: SALIR DE PAGO"
+        elif current_state.startswith('AGENDA_'):
+            mensaje_educativo = "Estoy teniendo problemas en el flujo de agendamiento. Para salir y volver al inicio, escribí: SALIR DE AGENDA"
+        else:
+            mensaje_educativo = "Tuve un problema técnico. Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR"
+        
+        return mensaje_educativo, state_context
 
 # --- LISTA DE INTENCIONES VÁLIDAS ---
 INTENCIONES_VALIDAS = [
@@ -1594,6 +1614,7 @@ if 'SCHEDULING' in config.ENABLED_AGENTS and 'agendamiento_handler' in globals()
         "mostrar_opciones_turnos": agendamiento_handler.mostrar_opciones_turnos,
         "finalizar_cita_automatico": agendamiento_handler.finalizar_cita_automatico, # Llamado por botón de turno
         "reiniciar_busqueda": agendamiento_handler.reiniciar_busqueda,
+        # ELIMINADO: "reanudar_agendamiento" - redundante, wrapper_preguntar() llama directamente a mostrar_opciones_turnos()
         
         # --- ACCIONES DE REPROGRAMACIÓN Y CANCELACIÓN (Simplificadas) ---
         # Nota: El triage de agendamiento se encarga de iniciar estos flujos.
@@ -1611,6 +1632,7 @@ if 'PAYMENT' in config.ENABLED_AGENTS and 'pago_handler' in globals():
         "confirmar_servicio_pago": pago_handler.confirmar_servicio_pago, # Llamado por botón de servicio
         "generar_link_pago": pago_handler.generar_link_pago, # Llamado por botón de confirmación "Sí"
         "reiniciar_flujo_pagos": pago_handler.reiniciar_flujo_pagos, # Llamado por botón de cancelación "No"
+        "reanudar_flujo_anterior": pago_handler.reanudar_flujo_anterior, # Usado por wrapper_preguntar() en estados específicos
         
         # --- ACCIONES COMPLEMENTARIAS ---
         "confirmar_pago": wrapper_confirmar_pago, # Adaptador de firma unificada
@@ -3796,7 +3818,16 @@ def process_message_logic(author, messages_to_process):
                 memory.update_conversation_state(author, current_state, context=_clean_context_for_firestore(nuevo_contexto))
         elif not respuesta_final:
             logger.warning(f"[ORQUESTADOR] No se pudo determinar una acción para '{mensaje_completo_usuario}'")
-            respuesta_final = "No estoy seguro de cómo ayudarte. ¿Podrías reformular tu pregunta?"
+            
+            # MENSAJE EDUCATIVO según el contexto actual
+            current_state = state_context.get('current_state', '') if state_context else ''
+            if current_state.startswith('PAGOS_'):
+                respuesta_final = "Estás en el flujo de pagos. Para continuar, seleccioná una opción o escribí: SALIR DE PAGO para volver al inicio."
+            elif current_state.startswith('AGENDA_'):
+                respuesta_final = "Estás en el flujo de agendamiento. Para continuar, seleccioná un turno o escribí: SALIR DE AGENDA para volver al inicio."
+            else:
+                respuesta_final = "Para agendar turnos, escribí: QUIERO AGENDAR. Para consultar servicios, escribí: QUIERO PAGAR. ¿En qué puedo ayudarte?"
+            
             if nuevo_contexto is None:
                 nuevo_contexto = state_context
 

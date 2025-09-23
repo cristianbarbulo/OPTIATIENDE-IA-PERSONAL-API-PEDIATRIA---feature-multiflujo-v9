@@ -518,25 +518,25 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
     
     # ======== PASO 2: SOLO EN FLUJOS ACTIVOS - EXTRACCIÓN DE DATOS ========
     
-    # Si ya está en un flujo activo, SOLO extraer información, NO cambiar dominio
+    # Si ya está en un flujo activo, SOLO extraer información - wrapper_preguntar() maneja el flujo
     if current_state:
         if current_state.startswith('PAGOS_'):
-            logger.info(f"[META_AGENTE] En flujo PAGOS activo - Solo extrayendo datos")
+            logger.info(f"[META_AGENTE] En flujo PAGOS activo - Solo extrayendo datos para wrapper_preguntar")
             datos_extraidos = _extraer_datos_pagos(texto_usuario)
             return {
                 "decision": "CONTINUAR_PAGOS",
                 "dominio": "PAGOS", 
                 "datos_extraidos": datos_extraidos,
-                "accion_recomendada": "reanudar_flujo_anterior"
+                "accion_recomendada": "preguntar"  # wrapper_preguntar maneja flujos activos
             }
         elif current_state.startswith('AGENDA_'):
-            logger.info(f"[META_AGENTE] En flujo AGENDA activo - Solo extrayendo datos")
+            logger.info(f"[META_AGENTE] En flujo AGENDA activo - Solo extrayendo datos para wrapper_preguntar")
             datos_extraidos = _extraer_datos_agendamiento(texto_usuario)
             return {
                 "decision": "CONTINUAR_AGENDAMIENTO",
                 "dominio": "AGENDAMIENTO",
                 "datos_extraidos": datos_extraidos, 
-                "accion_recomendada": "reanudar_agendamiento"
+                "accion_recomendada": "preguntar"  # wrapper_preguntar maneja flujos activos
             }
     
     # ======== PASO 3: SIN COMANDOS EXPLÍCITOS = AGENTE CERO ========
