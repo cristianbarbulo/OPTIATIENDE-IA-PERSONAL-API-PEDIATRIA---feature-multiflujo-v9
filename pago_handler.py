@@ -249,23 +249,19 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             "• Plan Premium\n\n"
             "O si tienes otro servicio en mente, dímelo y te genero el link correspondiente."
         )
-        context_info = {
+        # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+        import main
+        context_info_base = {
             "intencion": "pagar",
-            "ultimo_mensaje_usuario": mensaje_usuario,
             "estado_pago": "faltan_datos",
             "plan": "",
             "monto": "",
-            "proveedor": provider or "MERCADOPAGO",
-            "vendor_owner": memory.get_vendor_owner(author) if hasattr(memory, 'get_vendor_owner') else None
+            "proveedor": provider or "MERCADOPAGO"
         }
         user_message = {"role": "user", "content": mensaje_usuario}
         history_with_current = history + [user_message]
-        mensaje_raw = llm_handler.llamar_rodi_generador(instruccion, history_with_current, context_info)
-        try:
-            from utils import ensure_plain_text_from_llm as _plain
-            mensaje = _plain(mensaje_raw)
-        except Exception:
-            mensaje = str(mensaje_raw)
+        context_info = main._construir_context_info_completo(context_info_base, state_context, mensaje_usuario, "pagar", author)
+        mensaje = main._llamar_agente_cero_directo(history_with_current, context_info)
         contexto_guardar = detalles.copy()
         contexto_guardar.update({
             'plan': '',
@@ -302,23 +298,19 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             f"Para generar tu link de pago necesito: {', '.join(datos_faltantes)}. "
             "Por favor, indícame esa información y te lo envío al instante."
         )
-        context_info = {
+        # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+        import main
+        context_info_base = {
             "intencion": detalles.get("intencion", "pago"),
-            "ultimo_mensaje_usuario": mensaje_usuario,
             "estado_pago": "faltan_datos",
             "plan": plan,
             "monto": monto,
-            "proveedor": provider,
-            "vendor_owner": memory.get_vendor_owner(author) if hasattr(memory, 'get_vendor_owner') else None
+            "proveedor": provider
         }
         user_message = {"role": "user", "content": mensaje_usuario}
         history_with_current = history + [user_message]
-        mensaje_raw = llm_handler.llamar_rodi_generador(instruccion, history_with_current, context_info)
-        try:
-            from utils import ensure_plain_text_from_llm as _plain
-            mensaje = _plain(mensaje_raw)
-        except Exception:
-            mensaje = str(mensaje_raw)
+        context_info = main._construir_context_info_completo(context_info_base, state_context, mensaje_usuario, "pagar", author)
+        mensaje = main._llamar_agente_cero_directo(history_with_current, context_info)
         contexto_guardar = detalles.copy()
         contexto_guardar.update({
             'plan': plan,
@@ -355,24 +347,20 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             f"Monto: {monto}\n"
             "Indica al usuario que intente nuevamente más tarde o que un asistente humano lo contactará si es necesario, sin dar detalles técnicos."
         )
-        context_info = {
+        # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+        import main
+        context_info_base = {
             "intencion": detalles.get("intencion", "pago"),
-            "ultimo_mensaje_usuario": mensaje_usuario,
             "estado_pago": "error",
             "plan": plan,
             "monto": monto,
             "proveedor": provider,
-            "link_pago": None,
-            "vendor_owner": memory.get_vendor_owner(author) if hasattr(memory, 'get_vendor_owner') else None
+            "link_pago": None
         }
         user_message = {"role": "user", "content": mensaje_usuario}
         history_with_current = history + [user_message]
-        mensaje_raw = llm_handler.llamar_rodi_generador(instruccion, history_with_current, context_info)
-        try:
-            from utils import ensure_plain_text_from_llm as _plain
-            mensaje = _plain(mensaje_raw)
-        except Exception:
-            mensaje = str(mensaje_raw)
+        context_info = main._construir_context_info_completo(context_info_base, state_context, mensaje_usuario, "pagar", author)
+        mensaje = main._llamar_agente_cero_directo(history_with_current, context_info)
         contexto_guardar = detalles.copy()
         contexto_guardar.update({
             'plan': plan,
@@ -387,29 +375,20 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
         return mensaje, contexto_guardar
     
     # Si el link de pago fue generado correctamente, pásalo en el context_info
-    context_info = {
+    # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+    import main
+    context_info_base = {
         "intencion": detalles.get("intencion", "pago"),
-        "ultimo_mensaje_usuario": mensaje_usuario,
         "estado_pago": "link_generado",
         "plan": plan,
         "monto": monto,
         "proveedor": provider,
-        "link_pago": mensaje,
-        "vendor_owner": memory.get_vendor_owner(author) if hasattr(memory, 'get_vendor_owner') else None
+        "link_pago": mensaje
     }
-    prompt = (
-        f"Se generó el siguiente link de pago para el usuario: {mensaje}. "
-        f"Plan: {plan}, Monto: {monto}, Proveedor: {provider}. "
-        "Explícale cómo usarlo y qué hacer después de pagar."
-    )
     user_message = {"role": "user", "content": mensaje_usuario}
     history_with_current = history + [user_message]
-    mensaje_raw = llm_handler.llamar_rodi_generador(prompt, history_with_current, context_info)
-    try:
-        from utils import ensure_plain_text_from_llm as _plain
-        mensaje = _plain(mensaje_raw)
-    except Exception:
-        mensaje = str(mensaje_raw)
+    context_info = main._construir_context_info_completo(context_info_base, state_context, mensaje_usuario, "pagar", author)
+    mensaje = main._llamar_agente_cero_directo(history_with_current, context_info)
     contexto_guardar = detalles.copy()
     contexto_guardar.update({
         'plan': plan,
@@ -816,11 +795,11 @@ def mostrar_servicios_pago(history, detalles, state_context=None, mensaje_comple
             "servicio_original_id": servicio_id  # Guardar ID original para referencia
         })
     
-    # MEJORA CRÍTICA: Mensaje directo, claro y profesional
+    # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
     mensaje_principal = (
-        "💳 Elegí el servicio y te genero el link de pago del Dr. Adrián.\n"
+        "💳 Elegí el servicio y te genero el link de pago.\n"
         "- Tocá 'Elige un Servicio' y seleccioná.\n"
-        "En 2 pasos lo resolvemos.\n\n"
+        "- Para salir de pagos, escribí: SALIR DE PAGO\n\n"
         "📸 Una vez que pagues, enviá foto del comprobante donde se vea el monto."
     )
     titulo_lista = "Elige un Servicio"  # 17 caracteres
@@ -984,8 +963,8 @@ def confirmar_servicio_pago(history, detalles, state_context=None, mensaje_compl
     nombre = servicio_seleccionado.get('nombre', 'Servicio')
     precio = servicio_seleccionado.get('precio', 'Consultar')
     
-    # NUEVO: Enviar mensaje de confirmación con botones
-    mensaje_confirmacion = f"Seleccionaste '{nombre}' por ${precio}. ¿Es correcto?"
+    # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
+    mensaje_confirmacion = f"Seleccionaste '{nombre}' por ${precio}. ¿Es correcto?\n\nPara salir de pagos, escribí: SALIR DE PAGO"
     
     # Crear botones de confirmación
     botones_confirmacion = [

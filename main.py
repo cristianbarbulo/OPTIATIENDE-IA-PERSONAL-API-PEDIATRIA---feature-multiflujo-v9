@@ -705,42 +705,53 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
     triage_count = state_context.get('triage_count', 0)
     logger.info(f"[ESTRATEGIA] Contador de triage actual: {triage_count}")
 
-    # Llamada al Meta-Agente para determinar dominio (solo si hay departamentos)
-    dominio_sugerido = llm_handler.llamar_meta_agente(mensaje_enriquecido, history, current_state)
-    logger.info(f"[ESTRATEGIA] Meta-Agente decidió: Dominio='{dominio_sugerido}'")
+    # Llamada al Meta-Agente AMPLIFICADO para decisión + extracción
+    meta_resultado = llm_handler.llamar_meta_agente(mensaje_enriquecido, history, current_state)
+    logger.info(f"[ESTRATEGIA] Meta-Agente Amplificado decidió: {meta_resultado}")
 
-    # Llamada al Agente de Intención correspondiente
-    # Preparar hint silencioso de vendor para inyectar al inicio del prompt
-    try:
-        _vendor = (state_context or {}).get('vendor_owner')
-        if _vendor:
-            _vendor_hint = (
-                f"[CONTEXT PERMANENTE]\nCLIENTE DE: {str(_vendor).strip().upper()}. (No mencionar al usuario)\n"
-                "Ofrecer descuentos solo si el usuario los solicita explícitamente o en cierre/confirmación.\n"
-            )
-        else:
-            _vendor_hint = (
-                "[CONTEXT PERMANENTE]\nSIN ETIQUETA DE VENDEDOR.\n"
-                "Política: NO ofrezcas descuentos salvo que el usuario pregunte por precio/descuento o estemos en cierre.\n"
-            )
-    except Exception:
-        _vendor_hint = ""
-    dominio = "PAGOS" if dominio_sugerido == "PAGOS" else "AGENDAMIENTO"
-    if dominio == "PAGOS":
-        estrategia = llm_handler.llamar_agente_intencion_pagos(mensaje_completo_usuario, history, current_state, _vendor_hint)
+    # MANEJO DE DECISIONES DEL META-AGENTE
+    decision = meta_resultado.get("decision", "AGENTE_CERO")
+    
+    # Comando SALIR - limpiar estado y pasar al Agente Cero
+    if decision in ["SALIR_PAGOS", "SALIR_AGENDAMIENTO"]:
+        logger.info(f"[ESTRATEGIA] Comando SALIR detectado: {decision}")
+        # Limpiar estado completamente
+        state_context = {
+            'author': state_context.get('author'),
+            'senderName': state_context.get('senderName'),
+            'pasado_a_departamento': False,
+            'triage_count': 0
+        }
+        # Retornar acción que lleve al Agente Cero
+        estrategia = {
+            "accion_recomendada": "volver_agente_cero",
+            "detalles": {
+                "mensaje_salida": "Perfecto, saliste del flujo. ¿En qué más puedo ayudarte?"
+            }
+        }
+    elif decision == "AGENTE_CERO":
+        logger.info(f"[ESTRATEGIA] Sin comando explícito - Usando Agente Cero")
+        # Pasar control al Agente Cero para educación/conversación
+        estrategia = {
+            "accion_recomendada": "usar_agente_cero", 
+            "detalles": {}
+        }
     else:
-        estrategia = llm_handler.llamar_agente_intencion_agendamiento(mensaje_completo_usuario, history, current_state, _vendor_hint)
-
-    # Inyectar pista de dominio en los detalles para que el wrapper pueda decidir con más contexto (cambio quirúrgico)
-    try:
-        if isinstance(estrategia, dict):
-            detalles_existentes = estrategia.get("detalles") or {}
-            if isinstance(detalles_existentes, dict):
-                detalles_existentes["dominio_sugerido"] = dominio
-                estrategia["detalles"] = detalles_existentes
-    except Exception:
-        # No bloquear por este enriquecimiento
-        pass
+        # Flujo normal - comandos explícitos o en flujo activo
+        dominio = meta_resultado.get("dominio", "AGENDAMIENTO")
+        datos_extraidos = meta_resultado.get("datos_extraidos", {})
+        accion_recomendada = meta_resultado.get("accion_recomendada", "iniciar_triage_agendamiento")
+        
+        # Construir estrategia directamente con datos del Meta-Agente
+        estrategia = {
+            "accion_recomendada": accion_recomendada,
+            "detalles": datos_extraidos.copy()
+        }
+        
+        # Agregar información de dominio
+        estrategia["detalles"]["dominio_sugerido"] = dominio
+        
+        logger.info(f"[ESTRATEGIA] Estrategia construida desde Meta-Agente: {estrategia}")
 
     # PLAN DE REFACTORIZACIÓN v3: Detectar acciones de triage
     accion_recomendada = estrategia.get("accion_recomendada", "")
@@ -831,14 +842,9 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
     # MODO SOLO AGENTE CERO: todas las respuestas vienen del Agente Cero
     try:
         if not (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS)):
-            context_info = {}
-            if isinstance(detalles, dict):
-                context_info.update(detalles)
-            if isinstance(state_context, dict):
-                context_info.update(state_context)
-            context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
-            context_info["intencion"] = "preguntar"
-            respuesta_cero = _llamar_agente_cero_directo(config.PROMPT_AGENTE_CERO, history, context_info)
+            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+            context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", state_context.get('author') if state_context else None)
+            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
             return respuesta_cero, state_context
     except Exception:
         # Si algo falla, continuar con lógica general, pero no enviar textos rígidos
@@ -928,38 +934,17 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         return t_clean in acks or bool(solo_emoji)
 
     def _responder_ack_cortesia(detalles_locales: dict, sc: dict) -> tuple[str, dict]:
-        """Usa el Generador para una cortesía breve; si no está disponible, no envía nada."""
+        """Usa el Agente Cero para una cortesía breve."""
         try:
-            generador_habilitado = (
-                getattr(config, 'PROMPT_GENERADOR', None)
-                and (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS))
-            )
-            if not generador_habilitado:
-                # No enviar copy rígido; silencio elegante
-                return "", sc
-            context_info = {}
-            if isinstance(detalles_locales, dict):
-                context_info.update(detalles_locales)
-            if isinstance(sc, dict):
-                context_info.update(sc)
-            context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
-            context_info["intencion"] = "cierre_cortesia"
-            # Prompt breve y neutral (el modelo redacta en tono humano y sin botones)
-            prompt_ack = (
-                "Si el usuario solo agradece o confirma brevemente, responde con UNA sola frase corta de cortesía "
-                "y ofrece ayuda opcional. No reofrezcas listas ni botones, no pidas selección de servicios."
-            )
-            user_message = {"role": "user", "content": mensaje_completo_usuario}
-            history_with_current = history + [user_message]
-            respuesta_raw = llm_handler.llamar_rodi_generador(prompt_ack, history_with_current, context_info)
-            try:
-                from utils import ensure_plain_text_from_llm as _plain
-                respuesta = _plain(respuesta_raw)
-            except Exception:
-                respuesta = str(respuesta_raw)
+            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+            author = sc.get('author') if sc else None
+            context_info = _construir_context_info_completo(detalles_locales, sc, mensaje_completo_usuario, "cierre_cortesia", author)
+            
+            # REEMPLAZO QUIRÚRGICO: Usar Agente Cero con contexto completo
+            respuesta = _llamar_agente_cero_directo(history, context_info)
             return respuesta, sc
         except Exception:
-            # Ante cualquier fallo, evitar enviar un mensaje rígido
+            # Ante cualquier fallo, silencio elegante
             return "", sc
 
     # Permitir cambio explícito a AGENDA si el usuario lo pide, aunque haya PAGOS activo
@@ -1020,62 +1005,14 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # Si es un agradecimiento/ack breve, responder con cortesía (o silencio) y NO re-listar
         if _es_ack_breve(mensaje_completo_usuario):
             return _responder_ack_cortesia(detalles or {}, state_context)
-        # Si es una pregunta general, responder con generador y mantener el flujo de pagos
+        # Si es una pregunta general, responder con Agente Cero y mantener el flujo de pagos
         if _es_pregunta_general(mensaje_completo_usuario):
-            context_info = {}
-            if isinstance(detalles, dict):
-                context_info.update(detalles)
-            if isinstance(state_context, dict):
-                context_info.update(state_context)
-            context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
-            context_info["intencion"] = "preguntar"
-            try:
-                _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
-            except Exception:
-                pass
-            user_message = {"role": "user", "content": mensaje_completo_usuario}
-            history_with_current = history + [user_message]
-            # Usar generador solo si PROMPT_GENERADOR está definido
-            if getattr(config, 'PROMPT_GENERADOR', None):
-                respuesta_raw = llm_handler.llamar_rodi_generador(
-                    "Entendido. Aquí va la respuesta a tu consulta:", history_with_current, context_info
-                )
-                # Si el generador recomienda una acción, ejecutarla inmediatamente (derivación)
-                try:
-                    data_gen = utils.parse_json_from_llm_robusto(str(respuesta_raw), context="generador_wrapper_pagos") or {}
-                    accion_gen = (data_gen.get("accion_recomendada") or "").strip()
-                    if accion_gen and accion_gen in MAPA_DE_ACCIONES:
-                        # Enriquecer detalles con datos del generador (detalles + claves conocidas)
-                        detalles_generador = {}
-                        if isinstance(data_gen.get('detalles'), dict):
-                            detalles_generador.update(data_gen['detalles'])
-                        for k in [
-                            'fecha_deseada','hora_especifica','preferencia_horaria',
-                            'servicio_deseado','proveedor_preferido','plan','monto','proveedor'
-                        ]:
-                            if k in data_gen and data_gen[k]:
-                                detalles_generador[k] = data_gen[k]
-                        detalles_final = (detalles or {}).copy()
-                        detalles_final.update(detalles_generador)
-                        if data_gen.get('intencion'):
-                            detalles_final['intencion'] = data_gen['intencion']
-                        logger.info(f"[GENERADOR] Acción recomendada por Generador en PAGOS: {accion_gen}. Derivando inmediatamente con detalles enriquecidos: {list(detalles_generador.keys())}")
-                        return MAPA_DE_ACCIONES[accion_gen](
-                            history=history,
-                            detalles=detalles_final,
-                            state_context=state_context,
-                            mensaje_completo_usuario=mensaje_completo_usuario,
-                            author=author,
-                        )
-                except Exception:
-                    pass
-                try:
-                    from utils import ensure_plain_text_from_llm as _plain
-                    respuesta = _plain(respuesta_raw)
-                except Exception:
-                    respuesta = str(respuesta_raw)
-            else:
-                respuesta = "Te ayudo con tu consulta y después seguimos."
+            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
+            author = state_context.get('author') if state_context else None
+            context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
+            
+            # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
+            respuesta = _llamar_agente_cero_directo(history, context_info)
             return respuesta, state_context
         try:
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
@@ -1091,62 +1028,14 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # Si es un agradecimiento/ack breve, responder con cortesía (o silencio) y NO reofrecer turnos
         if _es_ack_breve(mensaje_completo_usuario):
             return _responder_ack_cortesia(detalles or {}, state_context)
-        # Si es una pregunta general, responder con generador y mantener el flujo
+        # Si es una pregunta general, responder con Agente Cero y mantener el flujo
         if _es_pregunta_general(mensaje_completo_usuario):
-            context_info = {}
-            if isinstance(detalles, dict):
-                context_info.update(detalles)
-            if isinstance(state_context, dict):
-                context_info.update(state_context)
-            context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
-            context_info["intencion"] = "preguntar"
-            try:
-                _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
-            except Exception:
-                pass
-            user_message = {"role": "user", "content": mensaje_completo_usuario}
-            history_with_current = history + [user_message]
-            # Usar generador solo si PROMPT_GENERADOR está definido
-            if getattr(config, 'PROMPT_GENERADOR', None):
-                respuesta_raw = llm_handler.llamar_rodi_generador(
-                    "Entendido. Aquí va la respuesta a tu consulta:", history_with_current, context_info
-                )
-                # Si el generador recomienda una acción, ejecutarla inmediatamente (derivación)
-                try:
-                    data_gen = utils.parse_json_from_llm_robusto(str(respuesta_raw), context="generador_wrapper_agenda") or {}
-                    accion_gen = (data_gen.get("accion_recomendada") or "").strip()
-                    if accion_gen and accion_gen in MAPA_DE_ACCIONES:
-                        # Enriquecer detalles con datos del generador
-                        detalles_generador = {}
-                        if isinstance(data_gen.get('detalles'), dict):
-                            detalles_generador.update(data_gen['detalles'])
-                        for k in [
-                            'fecha_deseada','hora_especifica','preferencia_horaria',
-                            'servicio_deseado','proveedor_preferido','plan','monto','proveedor'
-                        ]:
-                            if k in data_gen and data_gen[k]:
-                                detalles_generador[k] = data_gen[k]
-                        detalles_final = (detalles or {}).copy()
-                        detalles_final.update(detalles_generador)
-                        if data_gen.get('intencion'):
-                            detalles_final['intencion'] = data_gen['intencion']
-                        logger.info(f"[GENERADOR] Acción recomendada por Generador en AGENDA: {accion_gen}. Derivando inmediatamente con detalles enriquecidos: {list(detalles_generador.keys())}")
-                        return MAPA_DE_ACCIONES[accion_gen](
-                            history=history,
-                            detalles=detalles_final,
-                            state_context=state_context,
-                            mensaje_completo_usuario=mensaje_completo_usuario,
-                            author=author,
-                        )
-                except Exception:
-                    pass
-                try:
-                    from utils import ensure_plain_text_from_llm as _plain
-                    respuesta = _plain(respuesta_raw)
-                except Exception:
-                    respuesta = str(respuesta_raw)
-            else:
-                respuesta = "Te ayudo con tu consulta y después seguimos."
+            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
+            author = state_context.get('author') if state_context else None
+            context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
+            
+            # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
+            respuesta = _llamar_agente_cero_directo(history, context_info)
             return respuesta, state_context
         # NUEVO: Si hay restricciones activas, NO llamar a buscar_y_ofrecer_turnos
         # CORRECCIÓN: También verificar si ya tiene turno agendado para no ofrecer más turnos
@@ -1178,109 +1067,15 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                 # Si algo falla, continuar hacia generador como último recurso
                 pass
 
-    # 3) RESTRICCIONES ACTIVAS O Sin flujo activo: usar generador conversacional
-    context_info = {}
-    if detalles:
-        context_info.update(detalles)
-    if state_context:
-        context_info.update(state_context)
-    context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
-    context_info["intencion"] = detalles.get("intencion", "preguntar") if isinstance(detalles, dict) else "preguntar"
+    # 3) RESTRICCIONES ACTIVAS O Sin flujo activo: usar Agente Cero conversacional
+    # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
+    author = state_context.get('author') if state_context else None
+    intencion = "restricciones_pago" if hay_restricciones_activas else "preguntar"
+    context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, intencion, author)
 
-    # Enriquecer contexto para el generador con señales normalizadas del sistema
-    try:
-        _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
-    except Exception:
-        pass
-
-    user_message = {"role": "user", "content": mensaje_completo_usuario}
-    history_with_current = history + [user_message]
-
-    # NUEVO: Prompt específico para restricciones de pago
-    if hay_restricciones_activas:
-        prompt_mejorado = (
-            "El usuario está intentando agendar pero hay restricciones de pago activas. "
-            "Maneja esta situación conversacionalmente, explicando que necesita completar el pago primero "
-            "y ofreciendo ayuda para hacerlo."
-        )
-    else:
-        prompt_mejorado = (
-            "Parece que no logré entender tu pedido completamente. ¿Podrías darme más detalles sobre lo que buscas? "
-            "Por ejemplo: 'agendar turno', 'consultar pago', 'reprogramar cita', etc."
-        )
-
-    # Si no hay generador disponible o no hay departamentos habilitados, responder con fallback corto
-    # EXCEPCIÓN: Si hay restricciones activas, SIEMPRE usar el generador
-    try:
-        generador_habilitado = (
-            hay_restricciones_activas or (
-                getattr(config, 'PROMPT_GENERADOR', None)
-                and (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS))
-            )
-        )
-        if generador_habilitado:
-            respuesta_raw = llm_handler.llamar_rodi_generador(
-                prompt_mejorado, history_with_current, context_info
-            )
-            # Si el generador recomienda una acción, ejecutarla inmediatamente (derivación)
-            # EXCEPCIÓN: Si hay restricciones activas, NO ejecutar acciones de agendamiento
-            try:
-                data_gen = utils.parse_json_from_llm_robusto(str(respuesta_raw), context="generador_wrapper_sin_flujo") or {}
-                accion_gen = (data_gen.get("accion_recomendada") or "").strip()
-                
-                # Si hay restricciones, no ejecutar acciones de agendamiento que están bloqueadas
-                accion_bloqueada = (
-                    hay_restricciones_activas and 
-                    accion_gen in ["iniciar_triage_agendamiento", "mostrar_opciones_turnos", "buscar_y_ofrecer_turnos",
-                                  "finalizar_cita_automatico", "reiniciar_busqueda", "iniciar_reprogramacion_cita"]
-                )
-                
-                if accion_gen and accion_gen in MAPA_DE_ACCIONES and not accion_bloqueada:
-                    # Enriquecer detalles con datos del generador
-                    detalles_generador = {}
-                    if isinstance(data_gen.get('detalles'), dict):
-                        detalles_generador.update(data_gen['detalles'])
-                    for k in [
-                        'fecha_deseada','hora_especifica','preferencia_horaria',
-                        'servicio_deseado','proveedor_preferido','plan','monto','proveedor'
-                    ]:
-                        if k in data_gen and data_gen[k]:
-                            detalles_generador[k] = data_gen[k]
-                    detalles_final = (detalles or {}).copy()
-                    detalles_final.update(detalles_generador)
-                    if data_gen.get('intencion'):
-                        detalles_final['intencion'] = data_gen['intencion']
-                    logger.info(f"[GENERADOR] Acción recomendada por Generador sin flujo activo: {accion_gen}. Derivando inmediatamente con detalles enriquecidos: {list(detalles_generador.keys())}")
-                    return MAPA_DE_ACCIONES[accion_gen](
-                        history=history,
-                        detalles=detalles_final,
-                        state_context=state_context,
-                        mensaje_completo_usuario=mensaje_completo_usuario,
-                        author=author,
-                    )
-            except Exception:
-                pass
-            try:
-                from utils import ensure_plain_text_from_llm as _plain
-                respuesta = _plain(respuesta_raw)
-            except Exception:
-                respuesta = str(respuesta_raw)
-            return respuesta, state_context
-    except Exception:
-        logger.warning("[GENERADOR] No disponible o falló. Usando respuesta corta de fallback.")
-    # Fallback: en modo departamentos, texto corto; si no, Agente Cero
-    if (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS)):
-        return (
-            "Perfecto. Para ayudarte mejor, contame si querés agendar un turno o consultar/pagar un servicio. "
-            "También podés decirme tu consulta en una frase."
-        ), state_context
-    # Modo solo Agente Cero
-    try:
-        respuesta_cero = _llamar_agente_cero_directo(config.PROMPT_AGENTE_CERO, history, state_context)
-        return respuesta_cero, state_context
-    except Exception:
-        # Sin mensajes rígidos; devolver vacío para no enviar copy del sistema
-        return "", state_context
+    # REEMPLAZO QUIRÚRGICO: Sin flujo activo - usar Agente Cero siempre
+    respuesta = _llamar_agente_cero_directo(history, context_info)
+    return respuesta, state_context
 
 def _verificar_restricciones_pago(state_context: dict, author: str) -> dict | None:
     """
@@ -1654,10 +1449,46 @@ def wrapper_confirmar_pago(history, detalles, state_context, mensaje_completo_us
 # MAPA DE ACCIONES v7 (LIMPIO Y DEFINITIVO)
 # Este mapa contiene ÚNICAMENTE las acciones del nuevo flujo unificado.
 # Se han eliminado todas las acciones antiguas y redundantes para evitar "dobles vías".
+def wrapper_volver_agente_cero(history, detalles, state_context, mensaje_completo_usuario, author=None):
+    """
+    Nueva acción para comandos SALIR - vuelve al Agente Cero con estado limpio.
+    """
+    logger.info("[VOLVER_AGENTE_CERO] Procesando comando SALIR...")
+    
+    # Mensaje de salida del comando
+    mensaje_salida = detalles.get('mensaje_salida', '¿En qué más puedo ayudarte?')
+    
+    # Estado completamente limpio para conversación general
+    state_context_limpio = {
+        'author': state_context.get('author') if state_context else author,
+        'senderName': state_context.get('senderName') if state_context else None,
+        'pasado_a_departamento': False,
+        'triage_count': 0,
+        'current_state': 'conversando'
+    }
+    
+    return mensaje_salida, state_context_limpio
+
+def wrapper_usar_agente_cero(history, detalles, state_context, mensaje_completo_usuario, author=None):
+    """
+    Acción cuando Meta-Agente no detecta comandos explícitos.
+    El Agente Cero maneja la conversación y enseña los comandos disponibles.
+    """
+    logger.info("[USAR_AGENTE_CERO] Meta-Agente pasó control al Agente Cero...")
+    
+    # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+    context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "enseñar_comandos", author)
+    
+    # Llamar Agente Cero con contexto completo
+    respuesta = _llamar_agente_cero_directo(history, context_info)
+    return respuesta, state_context
+
 MAPA_DE_ACCIONES = {
     # --- ACCIONES SIEMPRE DISPONIBLES ---
     "preguntar": wrapper_preguntar,
     "escalar_a_humano": wrapper_escalar_a_humano,
+    "volver_agente_cero": wrapper_volver_agente_cero,
+    "usar_agente_cero": wrapper_usar_agente_cero,
 }
 
 # --- AGREGAR DINÁMICAMENTE SEGÚN CONFIGURACIÓN ---
@@ -3113,36 +2944,216 @@ def test_flujos_completos():
     
     return jsonify(resultados)
 
-def _llamar_agente_cero_directo(prompt_agente_cero, history, context_info):
-    """Función específica para llamar al Agente Cero con su prompt personalizado."""
-    logger.info("[AGENTE_CERO] Llamando directamente al LLM con prompt específico...")
+def _build_vendor_hint_from_context_main(context_info: dict) -> str:
+    """Devuelve un bloque de hint silencioso con el vendor_owner, si existe en context_info."""
+    try:
+        vendor = (context_info or {}).get('vendor_owner')
+        if not vendor:
+            return (
+                "[CONTEXT PERMANENTE]\n"
+                "SIN ETIQUETA DE VENDEDOR.\n"
+                "Política: NO ofrezcas descuentos salvo que el usuario pregunte por precio/descuento o estemos en cierre."
+            )
+        return (
+            f"[CONTEXT PERMANENTE]\nCLIENTE DE: {str(vendor).strip().upper()}. (No mencionar al usuario)\n"
+            "Ofrecer descuentos solo si el usuario los solicita explícitamente o en cierre/confirmación.\n"
+        )
+    except Exception:
+        return ""
+
+def _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, intencion="preguntar", author=None):
+    """
+    FUNCIÓN CRÍTICA: Construye context_info COMPLETO para el Agente Cero.
+    GARANTIZA que SIEMPRE reciba toda la información disponible.
+    """
+    context_info = {}
     
-    # Extraer el mensaje del usuario del contexto
+    # Agregar detalles si existen
+    if isinstance(detalles, dict):
+        context_info.update(detalles)
+    
+    # Agregar state_context si existe
+    if isinstance(state_context, dict):
+        context_info.update(state_context)
+    
+    # Agregar información básica obligatoria
+    context_info["ultimo_mensaje_usuario"] = mensaje_completo_usuario
+    context_info["intencion"] = intencion
+    
+    # CRÍTICO: Agregar vendor_owner si no está presente
+    if "vendor_owner" not in context_info and author:
+        try:
+            import memory
+            vendor = memory.get_vendor_owner(author)
+            if vendor:
+                context_info["vendor_owner"] = vendor
+        except Exception:
+            pass
+    
+    # CRÍTICO: Enriquecer con datos del sistema
+    try:
+        current_state_sc = state_context.get('current_state', '') if state_context else ''
+        _enriquecer_contexto_generador(context_info, state_context, current_state_sc)
+    except Exception as e:
+        logger.warning(f"[CONTEXT_INFO] Error enriqueciendo contexto: {e}")
+    
+    logger.info(f"[CONTEXT_INFO] Context_info completo construido: {list(context_info.keys())}")
+    return context_info
+
+def _llamar_agente_cero_directo(history, context_info):
+    """
+    Agente Cero mejorado: Recibe context_info completo como el generador.
+    RESPONSABILIDADES:
+    1. Resolver preguntando (respuesta directa)
+    2. Pasar al Meta-Agente (cuando detecta intención de agenda/pago)
+    """
+    logger.info("[AGENTE_CERO] Llamando con context_info completo...")
+    
+    # Extraer información del contexto enriquecido
     mensaje_usuario = context_info.get('ultimo_mensaje_usuario', '')
+    intencion = context_info.get('intencion', 'desconocida')
     
-    # Construir el prompt completo incluyendo el mensaje del usuario
-    prompt_completo = f"""{prompt_agente_cero}
+    # CORRECCIÓN CRÍTICA: Usar SIEMPRE config.PROMPT_AGENTE_CERO desde variables de entorno
+    # Construir contexto enriquecido igual que el generador
+    vendor_hint = _build_vendor_hint_from_context_main(context_info)
+    
+    prompt_completo = f"""{vendor_hint}
+{config.PROMPT_AGENTE_CERO}
 
 ---
-## MENSAJE DEL USUARIO:
+## CONTEXTO DEL SISTEMA (DATOS REALES Y ACTUALES)
+
+### INTENCIÓN ACTUAL: {intencion}
+**Significado:** Esta es la intención detectada del usuario en su último mensaje.
+
+### ÚLTIMO MENSAJE DEL USUARIO:
 "{mensaje_usuario}"
 
----
-## HISTORIAL DE CONVERSACIÓN:
+### ESTADOS DEL SISTEMA (DATOS REALES):
 """
     
-    # Agregar historial formateado
+    # Agregar información específica según el tipo de datos disponibles (IGUAL QUE GENERADOR)
+    if 'estado_agenda' in context_info:
+        estado_agenda = context_info['estado_agenda']
+        prompt_completo += f"""
+**ESTADO DE AGENDA:** {estado_agenda}
+**Significado:** 
+- 'sin_turno': El usuario aún no eligió un horario
+- 'agendado': La cita fue confirmada exitosamente
+- 'reprogramado': La cita fue modificada
+- 'cancelado': La cita fue cancelada
+- 'no_disponible': No hay horarios disponibles
+- 'error': Hubo un problema técnico
+"""
+        
+        if 'horarios_disponibles' in context_info:
+            slots = context_info['horarios_disponibles']
+            prompt_completo += f"""
+**HORARIOS DISPONIBLES:** {len(slots)} opciones
+**Significado:** Lista REAL de horarios disponibles obtenida del calendario.
+**IMPORTANTE:** Solo menciona estos horarios específicos, NO inventes otros.
+"""
+            
+        if 'id_evento' in context_info:
+            id_evento = context_info['id_evento']
+            prompt_completo += f"""
+**ID DE EVENTO:** {id_evento}
+**Significado:** Identificador único de la cita creada en el calendario.
+**IMPORTANTE:** Incluye este ID en tu respuesta para referencia.
+"""
+    
+    if 'estado_pago' in context_info:
+        estado_pago = context_info['estado_pago']
+        prompt_completo += f"""
+**ESTADO DE PAGO:** {estado_pago}
+**Significado:**
+- 'link_generado': Se creó exitosamente el link de pago
+- 'verificacion_fallida': No se pudo verificar el pago
+- 'sin_referencia': No se encontró la referencia de pago
+- 'faltan_datos': Faltan datos para generar el link
+- 'error': Hubo un problema técnico
+"""
+        if estado_pago == 'faltan_datos':
+            prompt_completo += "\n**IMPORTANTE:** FALTA INFORMACIÓN para generar el link de pago. Pide al usuario de forma clara y cálida que indique el dato faltante (plan, monto o proveedor)."
+        
+        if 'link_pago' in context_info:
+            link_pago = context_info['link_pago']
+            prompt_completo += f"""
+**LINK DE PAGO:** {link_pago}
+**Significado:** URL REAL generada para que el usuario realice el pago.
+**IMPORTANTE:** Incluye este link exacto en tu respuesta.
+"""
+            
+        if 'monto' in context_info:
+            monto = context_info['monto']
+            prompt_completo += f"""
+**MONTO:** {monto}
+**Significado:** Precio REAL del servicio/producto seleccionado.
+**IMPORTANTE:** Usa este monto exacto, NO inventes otros precios.
+"""
+            
+        if 'plan' in context_info:
+            plan = context_info['plan']
+            prompt_completo += f"""
+**PLAN:** {plan}
+**Significado:** Servicio/producto REAL seleccionado por el usuario.
+**IMPORTANTE:** Menciona este plan específico en tu respuesta.
+"""
+            
+        if 'proveedor' in context_info:
+            proveedor = context_info['proveedor']
+            prompt_completo += f"""
+**PROVEEDOR:** {proveedor}
+**Significado:** Plataforma de pago REAL que se está utilizando.
+**IMPORTANTE:** Menciona este proveedor en tu respuesta.
+"""
+    
+    if 'estado_general' in context_info:
+        estado_general = context_info['estado_general']
+        prompt_completo += f"""
+**ESTADO GENERAL:** {estado_general}
+**Significado:** Estado actual de la conversación en el sistema.
+"""
+
+    # Formatear historial para mayor claridad
+    historial_formateado = ""
     for msg in history:
         rol = msg.get('role', msg.get('name', 'asistente'))
         contenido = msg.get('content', '')
-        prompt_completo += f"{rol}: {contenido}\n"
-    
-    prompt_completo += """
+        historial_formateado += f"{rol}: {contenido}\n"
+
+    prompt_completo += f"""
 ---
-**RESPONDE SEGÚN LAS INSTRUCCIONES DEL PROMPT ANTERIOR:**
+### HISTORIAL DE CONVERSACIÓN:
+{historial_formateado}
+
+---
+### COMANDOS EXPLÍCITOS DEL SISTEMA:
+El usuario debe usar estos comandos EXACTOS para navegar:
+
+**PARA ENTRAR A FLUJOS:**
+- "QUIERO AGENDAR" → Entra al sistema de agendamiento
+- "QUIERO PAGAR" → Entra al sistema de pagos
+
+**PARA SALIR DE FLUJOS:**
+- "SALIR DE AGENDA" → Sale del sistema de agendamiento  
+- "SALIR DE PAGO" → Sale del sistema de pagos
+
+**IMPORTANTE:** Si el usuario no usa estos comandos exactos, enséñale que debe escribir exactamente estas frases.
+
+---
+### INSTRUCCIONES ESPECÍFICAS:
+1. **ENSEÑA COMANDOS:** Si el usuario quiere agendar/pagar pero no usó el comando exacto, dile: "Para ir a [agendamiento/pagos], escribí exactamente: QUIERO [AGENDAR/PAGAR]"
+2. **USA SOLO DATOS REALES:** Solo menciona horarios, precios, links y estados que estén en el contexto.
+3. **NO INVENTES:** Si no hay horarios disponibles, di que no hay disponibilidad.
+4. **SÉ PRECISO:** Usa los montos, planes y proveedores exactos que están en el contexto.
+5. **SÉ EMPÁTICO:** Mantén un tono cálido pero directo sobre los comandos.
+
+---
+**RESPONDE AL USUARIO:**
 """
     
-    # Llamar directamente a la API de OpenAI
+    # Llamar a la API de OpenAI con el contexto enriquecido
     try:
         import llm_handler
         messages = [
@@ -3229,34 +3240,16 @@ def _agente_cero_decision(mensaje_completo_usuario, history, state_context):
                 'state_context_updated': state_context
             }
     
-    # Obtener el prompt del Agente Cero desde variables de entorno (OBLIGATORIO)
-    prompt_agente_cero = os.environ['PROMPT_AGENTE_CERO']
-    # Prepend hint silencioso de vendor si existe
-    try:
-        _vendor = (state_context or {}).get('vendor_owner')
-        if not _vendor:
-            # Fallback: leer de memoria persistida
-            _vendor = memory.get_vendor_owner(context_info.get('author')) if 'context_info' in locals() else None
-        if _vendor:
-            _vendor_str = str(_vendor).strip().upper()
-            _hint = (
-                f"[CONTEXT PERMANENTE]\nCLIENTE DE: {_vendor_str}. (No mencionar al usuario)\n"
-                "Ofrecer descuentos solo si el usuario los solicita explícitamente o en cierre/confirmación.\n"
-            )
-            prompt_agente_cero = _hint + "\n" + prompt_agente_cero
-    except Exception:
-        pass
+    # CORRECCIÓN CRÍTICA: Usar la función centralizada que ya maneja vendor hints y contexto
+    # NO duplicar lógica - usar _llamar_agente_cero_directo que ya lo hace todo
     
     try:
-        # Construir el contexto para el Agente Cero
-        context_info = {
-            "ultimo_mensaje_usuario": mensaje_completo_usuario,
-            "historial_conversacion": len(history),
-            "pasado_a_departamento": state_context.get('pasado_a_departamento', False)
-        }
+        # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
+        author = state_context.get('author') if state_context else None
+        context_info = _construir_context_info_completo(None, state_context, mensaje_completo_usuario, "decidir_flujo", author)
         
-        # Llamar al LLM para obtener la decisión usando el prompt específico del Agente Cero
-        respuesta_raw = _llamar_agente_cero_directo(prompt_agente_cero, history, context_info)
+        # CORRECCIÓN CRÍTICA: Usar la función centralizada con config.PROMPT_AGENTE_CERO
+        respuesta_raw = _llamar_agente_cero_directo(history, context_info)
         
         logger.info(f"[AGENTE_CERO] Respuesta raw del LLM: {respuesta_raw}")
         

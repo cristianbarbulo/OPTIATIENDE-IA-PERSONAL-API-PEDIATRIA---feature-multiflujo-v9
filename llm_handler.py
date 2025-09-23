@@ -353,15 +353,115 @@ def llamar_analista_leads(transcripcion_completa: str) -> str:
 # --- NUEVOS AGENTES MULTI-AGENTE (V10) ---
 from datetime import datetime
 
+# === FUNCIONES DE EXTRACCIÓN DE DATOS PARA META-AGENTE AMPLIFICADO ===
+
+def _extraer_datos_agendamiento(texto_usuario: str) -> dict:
+    """
+    Extrae datos de agendamiento del mensaje del usuario.
+    Retorna diccionario con fecha_deseada, hora_especifica, preferencia_horaria, etc.
+    """
+    datos = {}
+    texto = texto_usuario.lower().strip()
+    
+    try:
+        # Extraer fecha específica usando utils
+        from utils import parsear_fecha_hora_natural
+        fecha_parseada, hora_parseada = parsear_fecha_hora_natural(texto_usuario)
+        
+        if fecha_parseada:
+            datos['fecha_deseada'] = fecha_parseada
+            logger.info(f"[EXTRACCION] Fecha detectada: {fecha_parseada}")
+        
+        if hora_parseada:
+            datos['hora_especifica'] = hora_parseada
+            logger.info(f"[EXTRACCION] Hora detectada: {hora_parseada}")
+        
+        # Extraer preferencia horaria
+        if any(p in texto for p in ["mañana", "temprano", "morning"]):
+            datos['preferencia_horaria'] = "mañana"
+        elif any(p in texto for p in ["tarde", "afternoon"]):
+            datos['preferencia_horaria'] = "tarde"
+        elif any(p in texto for p in ["noche", "evening", "night"]):
+            datos['preferencia_horaria'] = "noche"
+        
+        # Extraer restricciones temporales
+        restricciones = []
+        if "después de las" in texto or "después del" in texto:
+            # Buscar patrón "después de las X"
+            import re
+            match = re.search(r"después de las?(\d{1,2})", texto)
+            if match:
+                restricciones.append(f"después_{match.group(1)}")
+        
+        if "antes de las" in texto or "antes del" in texto:
+            import re
+            match = re.search(r"antes de las?(\d{1,2})", texto)
+            if match:
+                restricciones.append(f"antes_{match.group(1)}")
+        
+        if restricciones:
+            datos['restricciones_temporales'] = restricciones
+            
+    except Exception as e:
+        logger.warning(f"[EXTRACCION] Error extrayendo datos de agendamiento: {e}")
+    
+    return datos
+
+def _extraer_datos_pagos(texto_usuario: str) -> dict:
+    """
+    Extrae datos de pagos del mensaje del usuario.
+    Retorna diccionario con servicio_deseado, proveedor_preferido, etc.
+    """
+    datos = {}
+    texto = texto_usuario.lower().strip()
+    
+    try:
+        # Extraer servicio específico mencionado
+        import config
+        import json
+        
+        # Buscar servicios mencionados en el mensaje
+        try:
+            if hasattr(config, 'SERVICE_PRICES_JSON') and config.SERVICE_PRICES_JSON:
+                precios = json.loads(config.SERVICE_PRICES_JSON)
+                for servicio in precios.keys():
+                    if servicio.lower() in texto:
+                        datos['servicio_deseado'] = servicio
+                        datos['monto'] = precios[servicio]
+                        logger.info(f"[EXTRACCION] Servicio detectado: {servicio} (${precios[servicio]})")
+                        break
+        except Exception:
+            pass
+        
+        # Extraer proveedor de pago mencionado
+        if "mercado pago" in texto or "mercadopago" in texto:
+            datos['proveedor_preferido'] = "MERCADOPAGO"
+        elif "paypal" in texto:
+            datos['proveedor_preferido'] = "PAYPAL"
+        elif "modo" in texto:
+            datos['proveedor_preferido'] = "MODO"
+        
+        # Detectar si es confirmación de pago (comprobante)
+        if any(p in texto for p in ["comprobante", "pago realizado", "ya pagué", "ya pague", "envío pago"]):
+            datos['comprobante'] = "texto"
+            
+    except Exception as e:
+        logger.warning(f"[EXTRACCION] Error extrayendo datos de pagos: {e}")
+    
+    return datos
+
 def llamar_meta_agente(mensaje_usuario, history, current_state=None):
     """
-    PLAN DE ACCIÓN DEFINITIVO: Meta-agente simplificado con detección directa por palabras clave.
-    OBJETIVO: Eliminar el 90% de las fugas de flujo con reglas duras antes de consultar IA.
+    META-AGENTE AMPLIFICADO: Maneja clasificación + comandos explícitos + extracción de datos.
+    RESPONSABILIDADES:
+    1. Detectar comandos explícitos (quiero agendar, quiero pagar, salir de X)
+    2. Clasificar dominio (PAGOS vs AGENDAMIENTO)
+    3. Extraer datos específicos (fechas, servicios, etc.)
+    4. Retornar decisión estructurada con datos extraídos
     """
-    logger.info("Invocando Meta-Agente para decidir dominio...")
+    logger.info("Invocando Meta-Agente Amplificado para decisión y extracción...")
     
     # PLAN DE ACCIÓN: Extraer solo el texto del usuario si viene un mensaje enriquecido
-    # Soporta formatos como: "Contexto: <estado>. Usuario: '<texto>'"
     raw = mensaje_usuario or ""
     texto_usuario = raw
     try:
@@ -372,287 +472,88 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
     except Exception:
         texto_usuario = raw
 
-    # Detección directa por palabras clave
     texto_lower = texto_usuario.lower().strip()
     
-    # PALABRAS CLAVE CRÍTICAS PARA PAGOS (PRIORIDAD ALTA)
-    # Incluye consultas de servicios/planes para forzar cambio de dominio aunque estemos en AGENDA
-    palabras_pagar_criticas = [
-        "pagar", "pago", "abonar", "precio", "costo", "link de pago",
-        "mercado pago", "mercadopago", "paypal", "modo",
-        "servicio", "servicios", "plan", "planes"
-    ]
+    # ======== PASO 1: COMANDOS EXPLÍCITOS ========
     
-    # PALABRAS CLAVE CRÍTICAS PARA AGENDAMIENTO (PRIORIDAD ALTA)
-    palabras_agendar_criticas = [
-        "agendar", "turno", "cita", "fecha", "hora", "reprogramar", 
-        "cambiar turno", "modificar cita", "disponible", "horario"
-    ]
+    # Comando SALIR
+    if "salir de pago" in texto_lower or "salir de pagos" in texto_lower:
+        logger.info("[META_AGENTE] ✅ Comando SALIR DE PAGOS detectado")
+        return {
+            "decision": "SALIR_PAGOS",
+            "dominio": None,
+            "datos_extraidos": {},
+            "accion_recomendada": "salir_flujo"
+        }
     
-    # PALABRAS CLAVE AMBIGUAS (requieren contexto adicional)
-    palabras_ambigüas = [
-        "quiero", "necesito", "dame", "ver", "mostrame", "muestrame",
-        "opciones", "servicios", "planes"
-    ]
+    if "salir de agenda" in texto_lower or "salir de agendamiento" in texto_lower:
+        logger.info("[META_AGENTE] ✅ Comando SALIR DE AGENDAMIENTO detectado")
+        return {
+            "decision": "SALIR_AGENDAMIENTO", 
+            "dominio": None,
+            "datos_extraidos": {},
+            "accion_recomendada": "salir_flujo"
+        }
     
-    # PRE-CHEQUEO: detectar negaciones cercanas a términos de pago para evitar falsos positivos
-    try:
-        negacion_cercana = False
-        patrones_negacion = [
-            r"\bno\s+(quiero|deseo|voy a|prefiero)\s+(pagar|pago|abonar)\b",
-            r"\bno\s+(pagar|pago|abonar)\b",
-            r"\bno\s+ahora\b.*\b(pagar|pago|abonar)\b",
-            r"\bno\s+quiero\s+pagar\s+de\s+una\b",
-        ]
-        for patron in patrones_negacion:
-            if re.search(patron, texto_lower):
-                negacion_cercana = True
-                break
-    except Exception:
-        negacion_cercana = False
-
-    # DETECCIÓN DIRECTA CRÍTICA (SIN CONSULTAR IA)
-    # Regla adicional: patrones de cambio explícito a servicios (forzar PAGOS)
-    try:
-        patrones_servicios = [
-            r"\b(ver|prefiero ver|quiero ver)\s+(que\s+)?servicios\b",
-            r"\bver\s+servicios\b",
-        ]
-        for patron in patrones_servicios:
-            if re.search(patron, texto_lower):
-                logger.info("[META_AGENTE] ✅ Cambio explícito a servicios detectado. Forzando dominio PAGOS.")
-                return "PAGOS"
-    except Exception:
-        pass
-    for palabra in palabras_pagar_criticas:
-        if palabra in texto_lower:
-            if negacion_cercana:
-                logger.info(f"[META_AGENTE] ⚖️ Término de pago con negación detectado ('{palabra}'). Evitando forzar PAGOS.")
-                break
-            logger.info(f"[META_AGENTE] ✅ Detección directa PAGOS por palabra crítica: '{palabra}'. Forzando dominio PAGOS.")
-            return "PAGOS"
+    # Comandos ENTRADA EXPLÍCITA
+    if any(cmd in texto_lower for cmd in ["quiero agendar", "quiero agenda", "necesito agendar"]):
+        logger.info("[META_AGENTE] ✅ Comando QUIERO AGENDAR detectado")
+        datos_extraidos = _extraer_datos_agendamiento(texto_usuario)
+        return {
+            "decision": "AGENDAMIENTO",
+            "dominio": "AGENDAMIENTO", 
+            "datos_extraidos": datos_extraidos,
+            "accion_recomendada": "iniciar_triage_agendamiento"
+        }
     
-    for palabra in palabras_agendar_criticas:
-        if palabra in texto_lower:
-            logger.info(f"[META_AGENTE] ✅ Detección directa AGENDAMIENTO por palabra crítica: '{palabra}'. Forzando dominio AGENDAMIENTO.")
-            return "AGENDAMIENTO"
+    if any(cmd in texto_lower for cmd in ["quiero pagar", "quiero pago", "necesito pagar"]):
+        logger.info("[META_AGENTE] ✅ Comando QUIERO PAGAR detectado")
+        datos_extraidos = _extraer_datos_pagos(texto_usuario)
+        return {
+            "decision": "PAGOS",
+            "dominio": "PAGOS",
+            "datos_extraidos": datos_extraidos, 
+            "accion_recomendada": "iniciar_triage_pagos"
+        }
     
-    # DETECCIÓN DE PALABRAS AMBIGUAS CON CONTEXTO
-    tiene_palabras_ambigüas = any(palabra in texto_lower for palabra in palabras_ambigüas)
+    # ======== PASO 2: SOLO EN FLUJOS ACTIVOS - EXTRACCIÓN DE DATOS ========
     
-    if tiene_palabras_ambigüas:
-        # REGLA CRÍTICA: Si el usuario dice "quiero ver opciones" sin contexto específico, 
-        # y no hay estado actual, asumir AGENDAMIENTO por defecto
-        if not current_state or current_state == "sin estado":
-            logger.info(f"[META_AGENTE] Palabras ambiguas sin contexto. Asumiendo AGENDAMIENTO por defecto.")
-            return "AGENDAMIENTO"
-        
-        # Si hay estado actual, usar el contexto para decidir
+    # Si ya está en un flujo activo, SOLO extraer información, NO cambiar dominio
+    if current_state:
         if current_state.startswith('PAGOS_'):
-            logger.info(f"[META_AGENTE] Palabras ambiguas en contexto de PAGOS. Manteniendo dominio PAGOS.")
-            return "PAGOS"
+            logger.info(f"[META_AGENTE] En flujo PAGOS activo - Solo extrayendo datos")
+            datos_extraidos = _extraer_datos_pagos(texto_usuario)
+            return {
+                "decision": "CONTINUAR_PAGOS",
+                "dominio": "PAGOS", 
+                "datos_extraidos": datos_extraidos,
+                "accion_recomendada": "reanudar_flujo_anterior"
+            }
         elif current_state.startswith('AGENDA_'):
-            logger.info(f"[META_AGENTE] Palabras ambiguas en contexto de AGENDAMIENTO. Manteniendo dominio AGENDAMIENTO.")
-            return "AGENDAMIENTO"
+            logger.info(f"[META_AGENTE] En flujo AGENDA activo - Solo extrayendo datos")
+            datos_extraidos = _extraer_datos_agendamiento(texto_usuario)
+            return {
+                "decision": "CONTINUAR_AGENDAMIENTO",
+                "dominio": "AGENDAMIENTO",
+                "datos_extraidos": datos_extraidos, 
+                "accion_recomendada": "reanudar_agendamiento"
+            }
     
-    # Si no hay detección directa, usar el LLM para análisis más complejo
-    prompt = f"""Eres un Meta-Agente especializado en clasificar intenciones de usuario en conversaciones de WhatsApp.
-
-# REGLAS PRINCIPALES:
-1. **ANALIZA** el mensaje del usuario para determinar si su intención es de PAGOS o AGENDAMIENTO
-2. **RESPONDE** SOLO con "PAGOS" o "AGENDAMIENTO"
-3. **NO** agregues explicaciones adicionales
-
-# CRITERIOS DE CLASIFICACIÓN:
-
-## PAGOS (responder "PAGOS"):
-- Usuario quiere pagar, abonar, ver precios, costos
-- Usuario pide link de pago, opciones de pago
-- Usuario pregunta por servicios, planes, precios
-- Usuario menciona MercadoPago, PayPal, MODO
-- Usuario dice "quiero pagar", "necesito pagar", "dame opciones"
-- Usuario pregunta "que servicios tienen", "cuales son los planes"
-
-## AGENDAMIENTO (responder "AGENDAMIENTO"):
-- Usuario quiere agendar, programar, reservar turno/cita
-- Usuario pregunta por horarios, disponibilidad, fechas
-- Usuario quiere reprogramar, cambiar, modificar cita
-- Usuario dice "quiero agendar", "necesito turno", "que horarios tienen"
-- Usuario menciona fechas, horas, días específicos
-- Usuario dice "reprogramar", "cambiar fecha", "modificar cita"
-
-# ESTADO ACTUAL:
-- Estado actual: {current_state or 'sin estado'}
-
-# MENSAJE DEL USUARIO:
-{mensaje_usuario}
-
-# HISTORIAL RECIENTE:
-{str(history[-3:]) if history else 'sin historial'}
-
-Responde SOLO con "PAGOS" o "AGENDAMIENTO":"""
+    # ======== PASO 3: SIN COMANDOS EXPLÍCITOS = AGENTE CERO ========
     
-    try:
-        respuesta = _llamar_api_openai(
-            messages=[{"role": "system", "content": prompt}],
-            model=config.OPENAI_MODEL,
-            temperature=1.0,  # GPT-5 solo soporta temperature=1.0
-            max_completion_tokens=10,
-            agent_context="meta_agente"
-        )
-        
-        # Limpiar y normalizar la respuesta
-        respuesta_limpia = respuesta.strip().upper()
-        
-        if respuesta_limpia in ["PAGOS", "AGENDAMIENTO"]:
-            logger.info(f"[META_AGENTE] Decisión LLM: {respuesta_limpia}")
-            return respuesta_limpia
-        else:
-            logger.warning(f"[META_AGENTE] Respuesta LLM inválida: '{respuesta}'. Usando AGENDAMIENTO por defecto.")
-            return "AGENDAMIENTO"
-            
-    except Exception as e:
-        logger.error(f"[META_AGENTE] Error en LLM: {e}. Usando AGENDAMIENTO por defecto.")
-        return "AGENDAMIENTO"
+    # Si no hay comandos explícitos, el Meta-Agente NO debe tomar decisiones
+    # El usuario debe ser educado sobre los comandos disponibles
+    logger.info(f"[META_AGENTE] Sin comando explícito detectado - Pasando control al Agente Cero")
+    return {
+        "decision": "AGENTE_CERO",
+        "dominio": None,
+        "datos_extraidos": {},
+        "accion_recomendada": "usar_agente_cero"
+    }
 
-def llamar_agente_intencion_agendamiento(texto: str, history: list, current_state: str, contexto_extra: str = "") -> dict:
-    """
-    PLAN DE ACCIÓN v7: Agente de Intención de Agendamiento con prompt perfeccionado.
-    Extrae datos y utiliza un menú de acciones explícito y limitado.
-    """
-    logger.info("Invocando Agente de Intención de Agendamiento (Perfeccionado)...")
-
-    vendor_hint_block = contexto_extra.strip() if isinstance(contexto_extra, str) and contexto_extra.strip() else ""
-    prompt_template = f"""
-{vendor_hint_block}
-
-Eres un asistente experto en analizar solicitudes de agendamiento. Tu misión es doble:
-1.  Extraer datos clave del mensaje del usuario.
-2.  Recomendar la acción correcta de un menú limitado.
-
-# REGLAS:
-- **Extrae:** `fecha_deseada`, `hora_especifica`, `preferencia_horaria` (ej: "mañana", "tarde"), y `restricciones_temporales` (ej: "no puedo los lunes").
-- **Acción Recomendada:** Elige una acción de la sección # ACCIONES VÁLIDAS.
-- **Formato:** Responde únicamente con el JSON.
-
-# ACCIONES VÁLIDAS (Tu único menú de opciones):
-- `iniciar_triage_agendamiento`: Úsala para CUALQUIER solicitud de agendar, buscar o cambiar un turno. Es tu acción principal.
-- `iniciar_reprogramacion_cita`: Úsala si el usuario menciona explícitamente "reprogramar" y ya tiene una cita.
-- `iniciar_cancelacion_cita`: Úsala si el usuario menciona explícitamente "cancelar".
-- `preguntar`: Úsala para CUALQUIER pregunta general que no sea una solicitud directa de agendamiento (ej: "¿atienden los sábados?", "¿qué servicios ofrecen?").
-
-# EJEMPLOS:
-Usuario: "quiero un turno para mañana a la tarde"
-{{
-  "detalles": {{"fecha_deseada": "2025-08-02", "preferencia_horaria": "tarde"}},
-  "accion_recomendada": "iniciar_triage_agendamiento"
-}}
-
-Usuario: "necesito cancelar mi cita"
-{{
-  "detalles": {{}},
-  "accion_recomendada": "iniciar_cancelacion_cita"
-}}
-
-Usuario: "¿atienden los sábados?"
-{{
-  "detalles": {{"consulta": "horario sábados"}},
-  "accion_recomendada": "preguntar"
-}}
-
-# MENSAJE DEL USUARIO A ANALIZAR:
-{texto}
-
-# JSON DE SALIDA:
-"""
-    respuesta_raw = _llamar_api_openai(
-        messages=[{"role": "system", "content": prompt_template}],
-        model=config.OPENAI_MODEL,
-        temperature=1.0,  # GPT-5 solo soporta temperature=1.0
-        max_completion_tokens=250,
-        agent_context="intencion_agendamiento"
-    )
-    
-    data = utils.parse_json_from_llm(respuesta_raw, context="agente_intencion_agendamiento_v7") or {}
-    
-    # Validación final para asegurar que la acción es válida
-    acciones_validas = ["iniciar_triage_agendamiento", "iniciar_reprogramacion_cita", "iniciar_cancelacion_cita", "preguntar"]
-    if data.get("accion_recomendada") not in acciones_validas:
-        data["accion_recomendada"] = "preguntar" # Fallback seguro
-
-    if "detalles" not in data:
-        data["detalles"] = {}
-
-    return data
-
-def llamar_agente_intencion_pagos(texto: str, history: list, current_state: str, contexto_extra: str = "") -> dict:
-    """
-    PLAN DE ACCIÓN v7: Agente de Intención de Pagos con prompt perfeccionado.
-    Extrae datos y utiliza un menú de acciones explícito y limitado.
-    """
-    logger.info("Invocando Agente de Intención de Pagos (Perfeccionado)...")
-
-    vendor_hint_block = contexto_extra.strip() if isinstance(contexto_extra, str) and contexto_extra.strip() else ""
-    prompt_template = f"""
-{vendor_hint_block}
-
-Eres un asistente experto en analizar solicitudes de pago. Tu misión es doble:
-1.  Extraer el servicio que el usuario desea pagar.
-2.  Recomendar la acción correcta de un menú limitado.
-
-# REGLAS:
-- **Extrae:** `servicio_deseado`.
-- **Acción Recomendada:** Elige una acción de la sección # ACCIONES VÁLIDAS.
-- **Formato:** Responde únicamente con el JSON.
-
-# ACCIONES VÁLIDAS (Tu único menú de opciones):
-- `iniciar_triage_pagos`: Úsala para CUALQUIER solicitud de pagar o ver precios/servicios. Es tu acción principal.
-- `confirmar_pago`: Úsala SOLAMENTE si el usuario envía un comprobante de pago (generalmente una imagen).
-- `preguntar`: Úsala para CUALQUIER pregunta general (el orquestador derivará al Generador y mantendrá el flujo activo).
-
-# EJEMPLOS:
-Usuario: "quiero pagar el coaching personalizado"
-{{
-  "detalles": {{"servicio_deseado": "Coaching Personalizado"}},
-  "accion_recomendada": "iniciar_triage_pagos"
-}}
-
-Usuario: "[Imagen de un comprobante de pago]"
-{{
-  "detalles": {{"comprobante": "imagen"}},
-  "accion_recomendada": "confirmar_pago"
-}}
-
-Usuario: "¿aceptan tarjeta de crédito?"
-{{
-  "detalles": {{"consulta": "tarjeta de crédito"}},
-  "accion_recomendada": "preguntar"
-}}
-
-# MENSAJE DEL USUARIO A ANALIZAR:
-{texto}
-
-# JSON DE SALIDA:
-"""
-    respuesta_raw = _llamar_api_openai(
-        messages=[{"role": "system", "content": prompt_template}],
-        model=config.OPENAI_MODEL,
-        temperature=1.0,  # GPT-5 solo soporta temperature=1.0
-        max_completion_tokens=250,
-        agent_context="intencion_pagos"
-    )
-    
-    data = utils.parse_json_from_llm(respuesta_raw, context="agente_intencion_pagos_v7") or {}
-    
-    # Validación final para asegurar que la acción es válida
-    acciones_validas = ["iniciar_triage_pagos", "confirmar_pago", "preguntar"]
-    if data.get("accion_recomendada") not in acciones_validas:
-        data["accion_recomendada"] = "preguntar" # Fallback seguro
-        
-    if "detalles" not in data:
-        data["detalles"] = {}
-        
-    return data
+# === AGENTES DE INTENCIÓN ELIMINADOS ===
+# Estas funciones ahora son obsoletas porque el Meta-Agente amplificado 
+# maneja tanto la clasificación como la extracción de datos directamente.
 
 # --- Eliminar la función antigua llamar_agente_intencion ---
 # def llamar_agente_intencion(...):

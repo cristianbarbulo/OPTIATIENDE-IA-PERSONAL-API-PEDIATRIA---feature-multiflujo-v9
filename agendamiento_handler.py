@@ -5,7 +5,7 @@ import pytz
 import config
 from service_factory import get_calendar_service
 import llm_handler
-from llm_handler import llamar_rodi_generador
+# ELIMINADO: from llm_handler import llamar_rodi_generador (ya no se usa)
 import utils
 from utils import format_fecha_espanol, parsear_fecha_hora_natural, limpiar_contexto_agendamiento_unificado
 import memory
@@ -133,24 +133,16 @@ def buscar_y_ofrecer_turnos(history, detalles, state_context=None, mensaje_compl
     fecha_deseada = None
     hora_especifica = None
     
-    if mensaje_completo_usuario:
-        # Intentar extraer fecha y hora del mensaje usando el LLM Agent
-        try:
-            # Llamar al agente de intención para extraer entidades de fecha/hora
-            resultado_extraccion = llm_handler.llamar_agente_intencion_agendamiento(
-                mensaje_completo_usuario, history, "AGENDA_MOSTRANDO_OPCIONES", ""
-            )
-            
-            if resultado_extraccion and isinstance(resultado_extraccion, dict):
-                detalles_extraccion = resultado_extraccion.get('detalles', {})
-                fecha_deseada = detalles_extraccion.get('fecha_deseada')
-                hora_especifica = detalles_extraccion.get('hora_especifica')
-                
-                logger.info(f"[BUSCAR_TURNOS] Extracción LLM - fecha_deseada: {fecha_deseada}, hora_especifica: {hora_especifica}")
-        except Exception as e:
-            logger.warning(f"[BUSCAR_TURNOS] Error en extracción LLM: {e}")
+    # ELIMINADO: Extracción ahora la hace el Meta-Agente directamente
+    # Los datos ya vienen extraídos en 'detalles' desde el Meta-Agente amplificado
     
-    # Si no se extrajo fecha del mensaje, usar la del contexto o fecha actual
+    # Obtener datos extraídos por el Meta-Agente desde 'detalles'
+    if isinstance(detalles, dict):
+        fecha_deseada = detalles.get('fecha_deseada') or fecha_deseada
+        hora_especifica = detalles.get('hora_especifica') or hora_especifica
+        logger.info(f"[BUSCAR_TURNOS] Datos del Meta-Agente - fecha: {fecha_deseada}, hora: {hora_especifica}")
+    
+    # Si no hay fecha del Meta-Agente, usar la del contexto o fecha actual
     if not fecha_deseada:
         fecha_deseada = state_context.get('fecha_deseada')
         if not fecha_deseada:
@@ -455,41 +447,40 @@ def mostrar_opciones_turnos_reprogramacion(history, detalles, state_context=None
             'description': 'Confirmar reprogramación'
         })
     
-    # CORRECCIÓN CRÍTICA: Construir mensaje de respuesta inteligente para reprogramación
+    # MENSAJE EDUCATIVO PARA REPROGRAMACIÓN CON COMANDOS
     cita_original = state_context.get('cita_original_reprogramar', {})
     fecha_deseada = state_context.get('fecha_deseada')
     hora_especifica = state_context.get('hora_especifica')
     
-    # MENSAJE MEJORADO reprogramación
     if fecha_deseada and hora_especifica:
         mensaje_respuesta = (
             f"🔁 Reprogramación: opciones para {fecha_deseada} a las {hora_especifica}.\n"
             "- Tocá 'Ver Turnos' y elegí.\n"
-            "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+            "- Para salir del agendamiento, escribí: SALIR DE AGENDA"
         )
     elif fecha_deseada:
         mensaje_respuesta = (
             f"🔁 Reprogramación: opciones para {fecha_deseada}.\n"
             "- Tocá 'Ver Turnos' y elegí.\n"
-            "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+            "- Para salir del agendamiento, escribí: SALIR DE AGENDA"
         )
     elif hora_especifica:
         mensaje_respuesta = (
             f"🔁 Reprogramación: opciones a las {hora_especifica}.\n"
             "- Tocá 'Ver Turnos' y elegí.\n"
-            "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+            "- Para salir del agendamiento, escribí: SALIR DE AGENDA"
         )
     elif cita_original and cita_original.get('fecha_completa_legible'):
         mensaje_respuesta = (
             f"🔁 Reprogramación: opciones para la cita del {cita_original['fecha_completa_legible']}.\n"
             "- Tocá 'Ver Turnos' y elegí.\n"
-            "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+            "- Para salir del agendamiento, escribí: SALIR DE AGENDA"
         )
     else:
         mensaje_respuesta = (
             "🔁 Reprogramación: acá van las nuevas opciones.\n"
             "- Tocá 'Ver Turnos' y elegí.\n"
-            "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+            "- Para salir del agendamiento, escribí: SALIR DE AGENDA"
         )
     
     # NUEVO: Enviar mensaje con lista interactiva
@@ -552,21 +543,8 @@ def iniciar_cancelacion_cita(history, detalles, state_context=None, mensaje_comp
     if last_event_id:
         logger.info(f"[CANCELACION] last_event_id encontrado en state_context: {last_event_id}")
     
-    # Prioridad 2: Si no está en state_context, el LLM debería intentar identificarla del mensaje
-    if not last_event_id and mensaje_completo_usuario:
-        try:
-            # Llamar al agente de intención para extraer información de la cita
-            resultado_extraccion = llm_handler.llamar_agente_intencion_agendamiento(
-                mensaje_completo_usuario, history, "AGENDA_CANCELACION_CONFIRMANDO", ""
-            )
-            
-            if resultado_extraccion and isinstance(resultado_extraccion, dict):
-                detalles_extraccion = resultado_extraccion.get('detalles', {})
-                last_event_id = detalles_extraccion.get('last_event_id')
-                
-                logger.info(f"[CANCELACION] Extracción LLM - last_event_id: {last_event_id}")
-        except Exception as e:
-            logger.warning(f"[CANCELACION] Error en extracción LLM: {e}")
+    # ELIMINADO: Extracción ahora la hace el Meta-Agente directamente
+    # Los datos ya vienen en 'detalles' si están disponibles
     
     # Fallback: Si no se puede identificar, preguntar al usuario
     if not last_event_id:
@@ -813,11 +791,12 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
         }
         interactive_payload["action"]["sections"][0]["rows"].append(row)
     
-    # PLAN DE REFACTORIZACIÓN v3: Mensaje directivo y claro
+    # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
     mensaje_principal = (
         "📅 Turnos disponibles.\n"
         "- Tocá 'Ver Turnos' y elegí.\n"
-        "- Si no te sirven, decime el día en número (ej: 06/08) y si tenés preferencia de horario; busco ese turno o lo más cercano."
+        "- Para salir del agendamiento, escribí: SALIR DE AGENDA\n"
+        "- Si no te sirven estos turnos, decime el día en número (ej: 06/08) y si tenés preferencia de horario."
     )
     titulo_lista = "Ver Turnos"
     titulo_seccion = "Turnos Disponibles"
