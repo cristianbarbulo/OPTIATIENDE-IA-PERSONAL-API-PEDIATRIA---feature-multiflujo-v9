@@ -1,0 +1,32 @@
+# 🔄 RENDER DEPLOYMENT CONFIG - Revival Cron Service
+# Configuración para deploy automático en Render
+
+services:
+  - type: cron
+    name: revival-cron-multi-client
+    runtime: python3
+    plan: starter  # $7/mes
+    
+    # Build settings
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    
+    # Cron schedule: cada 6 horas (00:00, 06:00, 12:00, 18:00 UTC)
+    schedule: "0 */6 * * *"
+    
+    # Environment variables
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      
+      - key: CRON_SECRET_KEY
+        generateValue: true  # Render genera automáticamente
+      
+      - key: REQUEST_TIMEOUT
+        value: "30"
+      
+      - key: DRY_RUN
+        value: "false"  # Cambiar a "true" para testing
+      
+      # CONFIGURAR MANUALMENTE EN RENDER DASHBOARD:
+      # ACTIVE_CLIENTS=[{"name":"Cliente1","url":"https://cliente1.onrender.com","enabled":true}]

@@ -1,0 +1,97 @@
+2025-06-06 16:50:25,313 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-06 16:50:25,314 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-06 16:50:25,367 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.26:5000
+2025-06-06 16:50:25,368 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-06-06 16:50:25,370 - werkzeug - INFO -  * Restarting with stat
+2025-06-06 16:50:26,183 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-06 16:50:26,184 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-06 16:50:26,203 - werkzeug - WARNING -  * Debugger is active!
+2025-06-06 16:50:26,206 - werkzeug - INFO -  * Debugger PIN: 262-564-500
+2025-06-06 19:48:53,443 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-06 19:48:53,444 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-06 19:48:53,644 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.26:5000
+2025-06-06 19:48:53,644 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-06-06 19:48:53,648 - werkzeug - INFO -  * Restarting with stat
+2025-06-06 19:48:54,466 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-06 19:48:54,467 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-06 19:48:54,484 - werkzeug - WARNING -  * Debugger is active!
+2025-06-06 19:48:54,492 - werkzeug - INFO -  * Debugger PIN: 262-564-500
+2025-06-07 19:02:50,497 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-07 19:02:50,499 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-07 19:02:50,563 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.27:5000
+2025-06-07 19:02:50,563 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-06-07 19:02:50,565 - werkzeug - INFO -  * Restarting with stat
+2025-06-07 19:02:51,045 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-07 19:02:51,046 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-07 19:02:51,060 - werkzeug - WARNING -  * Debugger is active!
+2025-06-07 19:02:51,068 - werkzeug - INFO -  * Debugger PIN: 262-564-500
+2025-06-07 19:27:56,332 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-07 19:27:56,333 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-07 19:27:56,388 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.27:5000
+2025-06-07 19:27:56,388 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-06-07 19:27:56,390 - werkzeug - INFO -  * Restarting with stat
+2025-06-07 19:27:57,212 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-07 19:27:57,213 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-07 19:27:57,244 - werkzeug - WARNING -  * Debugger is active!
+2025-06-07 19:27:57,250 - werkzeug - INFO -  * Debugger PIN: 262-564-500
+2025-06-07 19:30:15,725 - werkzeug - INFO - 127.0.0.1 - - [07/Jun/2025 19:30:15] "[35m[1mPOST /webhook HTTP/1.1[0m" 500 -
+2025-06-07 19:33:25,032 - werkzeug - INFO -  * Detected change in 'C:\\Users\\crisb\\OneDrive\\Escritorio\\OPTINEX\\PROGRAMA ATENCION AL CLIENTE IA\\RODAMIENTOS LA ESPERANZA\\main.py', reloading
+2025-06-07 19:33:25,156 - werkzeug - INFO -  * Restarting with stat
+2025-06-07 19:33:26,151 - memory - INFO - Firebase y Firestore inicializados correctamente.
+2025-06-07 19:33:26,153 - __main__ - INFO - Iniciando el servidor Flask...
+2025-06-07 19:33:26,175 - werkzeug - WARNING -  * Debugger is active!
+2025-06-07 19:33:26,178 - werkzeug - INFO -  * Debugger PIN: 262-564-500
+2025-06-07 19:33:55,144 - __main__ - INFO - Webhook recibido: {
+  "messages": [
+    {
+      "id": "wamid.HBgNNTQ5MzQxMzE2NzE4NRUCABIYFDNBMURENkZFM0ZEQzg0OTg2NDc5AA==",
+      "body": "me encanto",
+      "fromMe": false,
+      "self": 0,
+      "isForwarded": false,
+      "author": "5493413167185@c.us",
+      "time": "1749335633",
+      "chatId": "5493413167185@c.us",
+      "type": "chat",
+      "senderName": "Cristian B\u00e1rbulo",
+      "caption": null,
+      "quotedMsgId": null,
+      "chatName": "5493413167185"
+    }
+  ],
+  "instanceId": "BAL322362207"
+}
+2025-06-07 19:33:55,146 - werkzeug - INFO - 127.0.0.1 - - [07/Jun/2025 19:33:55] "POST /webhook HTTP/1.1" 200 -
+2025-06-07 19:36:32,439 - __main__ - INFO - Webhook recibido: {
+  "messages": [
+    {
+      "id": "wamid.HBgNNTQ5MzQxMzE2NzE4NRUCABIYFDNBMDZGNTgyMjA5M0Y3NUJENkVFAA==",
+      "body": "perfecto!",
+      "fromMe": false,
+      "self": 0,
+      "isForwarded": false,
+      "author": "5493413167185@c.us",
+      "time": "1749335790",
+      "chatId": "5493413167185@c.us",
+      "type": "chat",
+      "senderName": "Cristian B\u00e1rbulo",
+      "caption": null,
+      "quotedMsgId": null,
+      "chatName": "5493413167185"
+    }
+  ],
+  "instanceId": "BAL322362207"
+}
+2025-06-07 19:36:32,440 - werkzeug - INFO - 127.0.0.1 - - [07/Jun/2025 19:36:32] "POST /webhook HTTP/1.1" 200 -

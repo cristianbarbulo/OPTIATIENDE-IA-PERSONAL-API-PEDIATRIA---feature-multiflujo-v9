@@ -1,0 +1,8 @@
+# 🔄 CRON REVIVAL SERVICE - Dependencias
+# Sistema independiente para revival de conversaciones multi-cliente
+
+# HTTP Requests - ÚNICA dependencia crítica
+requests==2.31.0
+
+# Variables de entorno (opcional pero útil)
+python-dotenv==1.0.0
