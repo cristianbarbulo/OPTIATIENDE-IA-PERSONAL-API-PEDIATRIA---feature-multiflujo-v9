@@ -3749,29 +3749,31 @@ def process_message_logic(author, messages_to_process):
                     pass
                 
                 if restriccion_result:
-                    # Hay restricciones activas - enriquecer contexto con situación específica
-                    logger.info(f"[RESTRICCIONES] Acción '{accion}' bloqueada por restricciones - Llamando al generador")
-                    
-                    # NUEVO: Enriquecer detalles con información específica de la situación
-                    detalles_enriquecidos = estrategia.get("detalles", {}).copy()
-                    detalles_enriquecidos.update({
-                        "situacion_especifica": "restriccion_pago_activa",
-                        "accion_bloqueada": accion,
-                        "cliente_quiere": "agendar",
-                        "estado_pago": "no_verificado",
-                        "instruccion_generador": "El cliente quiere agendar pero aún no realizó el pago. Atiéndelo cordialmente y ayúdalo a avanzar con el pago para poder agendar después. Dále las directivas necesarias."
-                    })
-                    
-                    respuesta_final, nuevo_contexto = wrapper_preguntar(
-                        history=history,
-                        detalles=detalles_enriquecidos,
-                        state_context=restriccion_result["context_updated"],
-                        mensaje_completo_usuario=mensaje_completo_usuario,
-                        author=author
-                    )
-                    # CORRECCIÓN CRÍTICA: Marcar estrategia como procesada para evitar doble ejecución
+                    # Hay restricciones activas: NO re-listar ni invocar generador. Responder educativo y claro.
+                    logger.info(f"[RESTRICCIONES] Acción '{accion}' bloqueada por restricciones - Respondiendo con educación de pago")
+                    try:
+                        import config
+                        motivo = restriccion_result["context_updated"].get(
+                            'restriction_message',
+                            'Para confirmar un turno necesitás tener el pago verificado.'
+                        )
+                        respuesta_final = (
+                            f"{motivo}\n"
+                            f"Primero, {config.COMMAND_TIPS['EXIT_AGENDA']}.\n"
+                            f"Luego, {config.COMMAND_TIPS['ENTER_PAGO']}.\n"
+                            f"Una vez aprobado el pago, vas a poder agendar normalmente con 'QUIERO AGENDAR' o eligiendo un turno."
+                        )
+                    except Exception:
+                        respuesta_final = (
+                            "Para confirmar un turno necesitás tener el pago verificado. "
+                            "Salí del agendamiento con: SALIR DE AGENDA. Para pagar escribí: QUIERO PAGAR. "
+                            "Luego podrás agendar con QUIERO AGENDAR."
+                        )
+                    # Preparar contexto actualizado con la marca de restricción
+                    nuevo_contexto = restriccion_result["context_updated"]
+                    # Marcar estrategia como procesada para evitar doble ejecución
                     logger.info(f"[RESTRICCIONES] Restricción aplicada - Bloqueando ejecución de '{accion}'")
-                    estrategia = None  # CRÍTICO: Evitar ejecución posterior de acción bloqueada
+                    estrategia = None  # Evitar ejecución posterior de acción bloqueada
                 
                 elif hay_restricciones_configuradas and state_context and state_context.get('payment_verified'):
                     # Pago verificado con restricciones configuradas - enriquecer contexto para el generador
