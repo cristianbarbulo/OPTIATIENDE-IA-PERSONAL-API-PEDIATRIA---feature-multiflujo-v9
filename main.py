@@ -1138,6 +1138,8 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # BLINDAJE V10: En agenda, NUNCA usar Agente Cero, SIEMPRE botones
         # Si hay nueva fecha en detalles, ejecutar nuevo triage
         detalles_actuales = detalles or {}
+        # Detectar modo reprogramación
+        es_reprogramacion = current_state_sc.startswith('AGENDA_REPROGRAMACION_') or bool(state_context.get('es_reprogramacion'))
         # Tomar fecha/hora detectadas por el Meta-Agente si existen
         fecha_nueva = detalles_actuales.get('fecha_deseada') or state_context.get('fecha_deseada')
         hora_especifica = detalles_actuales.get('hora_especifica') or state_context.get('hora_especifica')
@@ -1151,7 +1153,10 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                 detalles_actuales['hora_especifica'] = hora_especifica
             if preferencia_horaria:
                 detalles_actuales['preferencia_horaria'] = preferencia_horaria
-            return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+            if es_reprogramacion:
+                return agendamiento_handler.iniciar_reprogramacion_cita(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+            else:
+                return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
         else:
             # SIEMPRE mostrar turnos con botones - NO texto conversacional
             logger.info(f"[BLINDAJE_AGENDA] Forzando botones de turnos - NO texto conversacional")
@@ -1164,9 +1169,14 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                 if preferencia_horaria:
                     detalles_actuales['preferencia_horaria'] = preferencia_horaria
 
-                resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(
-                    history, detalles_actuales, state_context, mensaje_completo_usuario, author
-                )
+                if es_reprogramacion:
+                    resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos_reprogramacion(
+                        history, detalles_actuales, state_context, mensaje_completo_usuario, author
+                    )
+                else:
+                    resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(
+                        history, detalles_actuales, state_context, mensaje_completo_usuario, author
+                    )
                 
                 # Si mostrar_opciones_turnos devuelve None (éxito), mensaje interactivo enviado
                 if resultado is None:

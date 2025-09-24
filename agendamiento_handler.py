@@ -399,9 +399,23 @@ def iniciar_reprogramacion_cita(history, detalles, state_context=None, mensaje_c
         fecha_legible = ultimo_turno.get('fecha_completa_legible', 'tu cita confirmada')
         logger.info(f"[REPROGRAMACION] Turno encontrado para reprogramar: {fecha_legible}")
         
-        # Guardar información de la cita original
+        # Guardar información de la cita original y preparar contexto de reprog
         state_context['cita_original_reprogramar'] = ultimo_turno
         state_context['es_reprogramacion'] = True
+        # Asegurar que tengamos el id del evento a reprogramar
+        try:
+            last_event_id_detectado = ultimo_turno.get('id_evento')
+            if last_event_id_detectado:
+                state_context['last_event_id'] = last_event_id_detectado
+                logger.info(f"[REPROGRAMACION] last_event_id establecido: {last_event_id_detectado}")
+        except Exception:
+            pass
+        # Evitar usar un slot_seleccionado viejo del turno anterior
+        if 'slot_seleccionado' in state_context:
+            try:
+                del state_context['slot_seleccionado']
+            except Exception:
+                state_context['slot_seleccionado'] = None
         
         # Extraer información de fecha/hora de los detalles si está disponible
         fecha_deseada = None
@@ -1160,6 +1174,13 @@ def finalizar_cita_automatico(history, detalles, state_context=None, mensaje_com
         return "Error interno. No se pudo identificar al usuario.", state_context
     
     # NUEVA MEJORA: Crear evento real en Google Calendar
+    # Si es reprogramación y llegó un id_interactivo, forzar refrescar el slot a partir del id
+    if state_context.get('es_reprogramacion') and isinstance(detalles, dict) and detalles.get('id_interactivo'):
+        try:
+            if 'slot_seleccionado' in state_context:
+                del state_context['slot_seleccionado']
+        except Exception:
+            state_context['slot_seleccionado'] = None
     slot_seleccionado = state_context.get('slot_seleccionado')
     es_reprogramacion = state_context.get('es_reprogramacion', False)
     
@@ -1243,6 +1264,14 @@ def finalizar_cita_automatico(history, detalles, state_context=None, mensaje_com
             if success:
                 event_id = last_event_id  # Mantener el mismo ID
                 logger.info(f"[FINALIZAR_CITA] Evento reprogramado exitosamente: {event_id}")
+                # Actualizar contexto de cita original con nuevos datos
+                state_context['cita_original_reprogramar'] = {
+                    'id_evento': event_id,
+                    'fecha_para_titulo': slot_seleccionado.get('fecha_para_titulo', ''),
+                    'fecha_completa_legible': slot_seleccionado.get('fecha_completa_legible', ''),
+                    'slot_iso': slot_seleccionado.get('slot_iso', ''),
+                    'es_reprogramacion': True
+                }
             else:
                 logger.error(f"[FINALIZAR_CITA] Error al reprogramar evento: {last_event_id}")
                 return "Lo siento, hubo un error al reprogramar tu cita. Por favor, intenta de nuevo.", state_context
