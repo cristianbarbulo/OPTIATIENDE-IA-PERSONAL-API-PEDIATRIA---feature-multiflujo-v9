@@ -736,6 +736,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             "accion_recomendada": "usar_agente_cero", 
             "detalles": {}
         }
+    # CORRECCIÓN DEFINITIVA - Reescribir línea problemática
     else:
         # Flujo normal - comandos explícitos o en flujo activo
         dominio = meta_resultado.get("dominio", "AGENDAMIENTO")
@@ -3560,8 +3561,9 @@ def process_message_logic(author, messages_to_process):
                         mensaje_completo_usuario=mensaje_completo_usuario,
                         author=author
                     )
-                    # Marcar que ya manejamos la respuesta para saltar la ejecución de la acción original
-                    logger.info(f"[RESTRICCIONES] Generador manejó restricciones - Saltando ejecución original de '{accion}'")
+                    # CORRECCIÓN CRÍTICA: Marcar estrategia como procesada para evitar doble ejecución
+                    logger.info(f"[RESTRICCIONES] Restricción aplicada - Bloqueando ejecución de '{accion}'")
+                    estrategia = None  # CRÍTICO: Evitar ejecución posterior de acción bloqueada
                 
                 elif hay_restricciones_configuradas and state_context and state_context.get('payment_verified'):
                     # Pago verificado con restricciones configuradas - enriquecer contexto para el generador

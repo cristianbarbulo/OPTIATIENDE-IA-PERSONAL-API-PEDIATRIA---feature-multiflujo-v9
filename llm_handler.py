@@ -187,7 +187,8 @@ def _build_vendor_hint_from_context(context_info: dict) -> str:
     except Exception:
         return ""
 
-def llamar_rodi_generador(prompt_base: str, conversation_history: list, context_info: dict) -> str:
+# ELIMINADO V10: Esta función ya no existe en sistema simplificado
+def _ELIMINADO_llamar_rodi_generador_OBSOLETO():
     """Agente 2: GENERADOR CONVERSACIONAL. Genera respuestas de texto naturales con contexto explícito."""
     logger.info("Invocando a RODI Generador (Modo Conversacional, contexto explícito)...")
     # Si no hay PROMPT_GENERADOR definido, no se permite invocar al generador
@@ -566,5 +567,6 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
 #     ...
 # (Función eliminada en la migración a multi-agente)
 
-# ELIMINADO: llamar_agente_dinamico ya no se usa en el sistema
-# El sistema funciona perfectamente con llamar_rodi_generador directamente
+# ELIMINADO V10: llamar_agente_dinamico ya no se usa en el sistema
+# ELIMINADO V10: llamar_rodi_generador ya no existe en sistema simplificado
+# Toda la funcionalidad está ahora en _llamar_agente_cero_directo() en main.py
