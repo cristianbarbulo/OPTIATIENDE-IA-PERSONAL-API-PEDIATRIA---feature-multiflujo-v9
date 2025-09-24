@@ -1134,8 +1134,12 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                     state_context['restricciones_temporales'] = existentes + restricciones_msg
         except Exception as _e:
             logger.warning(f"[AGENDA_PARSE] Error parseando fecha/hora natural: {_e}")
-
+        
         # BLINDAJE V10: En agenda, NUNCA usar Agente Cero, SIEMPRE botones
+        # Si el mensaje es un ID interactivo de turno, no re-listar; dejar que validación/acción lo procese
+        if isinstance(mensaje_completo_usuario, str) and mensaje_completo_usuario.startswith("turno_"):
+            logger.info("[BLINDAJE_AGENDA] ID interactivo detectado en wrapper; no re-listar, esperar acción segura")
+            return None, state_context
         # Si hay nueva fecha en detalles, ejecutar nuevo triage
         detalles_actuales = detalles or {}
         # Detectar modo reprogramación
@@ -3827,7 +3831,7 @@ def process_message_logic(author, messages_to_process):
                     logger.warning(f"[AGENTE_CERO_LOCK] No se pudo persistir el lock previo a la acción '{accion}': {e}")
             logger.info(f"[EJECUTAR] Ejecutando acción '{accion}' para {author}")
             respuesta_final, nuevo_contexto = _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_usuario, author)
-
+            
             # APLICAR BLINDAJE DE SALIDA SOBRE EL NUEVO CONTEXTO ANTES DE PERSISTIR
             context_to_commit = nuevo_contexto if nuevo_contexto is not None else state_context
             # PRESERVAR CAMPOS CRÍTICOS DEL CONTEXTO ANTERIOR (no perder flags como payment_verified)

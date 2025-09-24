@@ -542,8 +542,8 @@ def parsear_fecha_hora_natural(texto, preferencia_tz=None, return_details=False)
 
         # --- Extracción de hora explícita ---
         patrones_hora = [
+            # Requiere contexto claro de hora para evitar confundir "12 de diciembre" con hora 12
             r'a las (\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',
-            r'(\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',
             r'(\d{1,2})\s*(hs?|horas?)\s*de\s*(mañana|tarde|noche)',
             r'(\d{1,2})\s*de\s*(mañana|tarde|noche)',
             r'(\d{1,2})\s*(hs?|horas?)\s*(de\s*la\s*)?(mañana|tarde|noche)',
@@ -639,6 +639,27 @@ def parsear_fecha_hora_natural(texto, preferencia_tz=None, return_details=False)
                 fecha_especifica_iso = get_next_weekday_date(dia_semana_detectado)
                 logger.info(f"[UTILS] Día de semana extraído: {dia_semana_detectado} -> {fecha_especifica_iso}")
                 break
+
+        # --- Meses por nombre ("12 de diciembre") ---
+        meses_nombre = {
+            'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+            'julio': 7, 'agosto': 8, 'septiembre': 9, 'setiembre': 9, 'octubre': 10,
+            'noviembre': 11, 'diciembre': 12
+        }
+        m_nombre = re.search(r"\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?\b", texto_norm)
+        if m_nombre:
+            try:
+                dia = int(m_nombre.group(1))
+                mes = meses_nombre[m_nombre.group(2)]
+                anio = int(m_nombre.group(3)) if m_nombre.group(3) else datetime.now().year
+                fecha_candidata = datetime(anio, mes, dia)
+                # Si no se especificó año y la fecha ya pasó, asumir próximo año
+                if not m_nombre.group(3) and fecha_candidata.date() < datetime.now().date():
+                    fecha_candidata = fecha_candidata.replace(year=anio + 1)
+                fecha_especifica_iso = fecha_candidata.strftime('%Y-%m-%d')
+                logger.info(f"[UTILS] Fecha por nombre de mes: {fecha_especifica_iso}")
+            except Exception:
+                pass
 
         # --- dateparser: fallback/general ---
         settings = {
