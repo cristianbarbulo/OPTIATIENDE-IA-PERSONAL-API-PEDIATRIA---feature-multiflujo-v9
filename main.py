@@ -690,7 +690,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
                 # CORRECCIÓN V10: NO forzar 'conversando', respetar estado actual
                 # Solo inicializar si no hay estado (nuevo usuario)
                 if not state_context.get('current_state'):
-                    state_context['current_state'] = 'inicial'
+                    state_context['current_state'] = 'conversando'
             # Estrategia: solo 'preguntar'
             return {"detalles": {}, "accion_recomendada": "preguntar"}
     except Exception:
@@ -796,7 +796,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
          logger.info(f"[ESTRATEGIA] Forzando estado inicial de agendamiento a '{estrategia['proximo_estado_sugerido']}' para evitar estados fantasma.")
     
     # Añadir una re-evaluación si la IA solo sugiere "preguntar" pero estamos en un flujo
-    if estrategia.get("accion_recomendada") == "preguntar" and current_state not in ['preguntando', 'conversando', 'inicio']:
+    if estrategia.get("accion_recomendada") == "preguntar" and (current_state.startswith('PAGOS_') or current_state.startswith('AGENDA_')):
          logger.info(f"[ESTRATEGIA] LLM sugirió 'preguntar' en estado de flujo '{current_state}'. Dejamos que el wrapper use Generador y mantenga el flujo.")
 
     logger.info(f"[ESTRATEGIA] Estrategia LLM obtenida: {estrategia}")
@@ -1050,10 +1050,33 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             if state_context.get('payment_verified'):
                 # Regla de negocio: pago verificado permite saltar directo a agendamiento sin frase
                 logger.info("[BLINDAJE_PAGOS] Pago verificado: iniciando agendamiento automáticamente")
+                detalles_auto = (detalles or {}).copy()
+                try:
+                    from utils import parsear_fecha_hora_natural as _parse_fecha_hora
+                    parsed = _parse_fecha_hora(mensaje_completo_usuario or "", return_details=True) or {}
+                    if parsed:
+                        fecha_dt = parsed.get('fecha_datetime')
+                        fecha_iso = parsed.get('fecha_iso')
+                        hora_parseada = parsed.get('hora')
+                        preferencia_horaria_msg = parsed.get('preferencia_horaria')
+                        if fecha_dt:
+                            detalles_auto['fecha_deseada'] = fecha_dt.strftime('%Y-%m-%d')
+                        elif fecha_iso:
+                            detalles_auto['fecha_deseada'] = fecha_iso
+                        if hora_parseada:
+                            detalles_auto['hora_especifica'] = hora_parseada
+                        if preferencia_horaria_msg:
+                            detalles_auto['preferencia_horaria'] = preferencia_horaria_msg
+                except Exception as _e:
+                    logger.warning(f"[BLINDAJE_PAGOS] No se pudo parsear fecha/hora para autoiniciar agenda: {_e}")
+                try:
+                    logger.info(f"[PAGOS→AGENDA_PARSE] Filtros autoinicio: fecha={detalles_auto.get('fecha_deseada')}, hora={detalles_auto.get('hora_especifica')}, pref={detalles_auto.get('preferencia_horaria')}")
+                except Exception:
+                    pass
                 return _ejecutar_accion(
                     'iniciar_triage_agendamiento',
                     history,
-                    detalles or {},
+                    detalles_auto,
                     state_context,
                     mensaje_completo_usuario,
                     author
@@ -1075,6 +1098,10 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             from utils import parsear_fecha_hora_natural as _parse_fecha_hora
             parsed = _parse_fecha_hora(mensaje_completo_usuario or "", return_details=True) or {}
             if parsed:
+                try:
+                    logger.info(f"[AGENDA_PARSE] Extraído desde texto: {parsed}")
+                except Exception:
+                    pass
                 fecha_dt = parsed.get('fecha_datetime')
                 fecha_iso = parsed.get('fecha_iso')
                 hora_parseada = parsed.get('hora')
@@ -2157,10 +2184,17 @@ def mercadopago_webhook():
         status = payment.get('status')
         phone = memory.get_phone_by_reference(ext_ref) if ext_ref else None
         if phone:
+            # Unificar estados: si no está aprobado, mantener en flujo de pagos esperando confirmación
             if status == 'approved':
-                memory.update_conversation_state(phone, 'agendando_cita', context={})
+                # No forzar dominio/estado; solo marcar verificado en el contexto actual
+                history, _, current_state, state_context = memory.get_conversation_data(phone_number=phone)
+                sc = state_context or {}
+                sc['payment_verified'] = True
+                sc['payment_status'] = 'VERIFICADO'
+                sc['payment_verification_timestamp'] = datetime.utcnow().isoformat()
+                memory.update_conversation_state(phone, sc.get('current_state', current_state), context=_clean_context_for_firestore(sc))
             else:
-                memory.update_conversation_state(phone, 'esperando_confirmacion_pago', context={'external_reference': ext_ref})
+                memory.update_conversation_state(phone, 'PAGOS_ESPERANDO_CONFIRMACION', context={'external_reference': ext_ref})
         logger.info(f"[MP-WEBHOOK] Pago {status} para ref {ext_ref}")
     except Exception as e:
         logger.error(f"Error en webhook de MercadoPago: {e}", exc_info=True)
@@ -2673,12 +2707,12 @@ def _limpiar_contexto_al_finalizar_flujo(author, proximo_estado, state_context):
         "usuario_inactivo", "problema_sistema"
     ]
     
-    # Estados que indican retorno a estado inicial O INICIO DE NUEVO FLUJO QUE LIMPIA
+    # Estados que indican retorno a estado base (solo los necesarios)
     estados_retorno_inicial = [
-        "preguntando", "inicial", "conversando", "inicio",
-        # ¡NUEVO!: Añadir los estados iniciales de los flujos principales que deben limpiar el contexto
-        "iniciar_triage_agendamiento", # Si el LLM decide ir aquí, limpia lo anterior
-        "iniciar_triage_pagos" # Si el LLM decide ir aquí, limpia lo anterior
+        "conversando",
+        # Estados de triage (inician flujo y limpian contexto anterior)
+        "iniciar_triage_agendamiento",
+        "iniciar_triage_pagos"
     ]
     
     # NUEVA MEJORA: Confirmar que todas las funciones de "triage" o "inicio de flujo" retornen un proximo_estado_sugerido que esté en esta lista
@@ -3778,7 +3812,10 @@ def process_message_logic(author, messages_to_process):
                 texto_usuario_uc = (mensaje_completo_usuario or '').upper()
                 if current_state_before.startswith('PAGOS_'):
                     if requested_state and not str(requested_state).startswith('PAGOS_'):
-                        if requested_state == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc) and (context_to_commit or {}).get('payment_verified'):
+                        # Permitir transicionar a AGENDA_* si el pago está verificado (auto-agenda)
+                        if (str(requested_state).startswith('AGENDA_') and (context_to_commit or {}).get('payment_verified')):
+                            logger.info(f"[BLINDAJE_ESTADO] Permitida salida de PAGOS→AGENDA por pago verificado: '{current_state_before}' → '{requested_state}'")
+                        elif requested_state == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
                             pass
                         else:
                             logger.info(f"[BLINDAJE_ESTADO] Rechazando salida de PAGOS: '{current_state_before}' → '{requested_state}'")
@@ -3825,7 +3862,10 @@ def process_message_logic(author, messages_to_process):
             texto_usuario_uc = (mensaje_completo_usuario or '').upper()
             if current_state_local.startswith('PAGOS_'):
                 if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('PAGOS_'):
-                    if proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
+                    # Permitir transición a AGENDA_* si el pago ya está verificado
+                    if proximo_estado_sugerido.startswith('AGENDA_') and (state_context or {}).get('payment_verified'):
+                        pass
+                    elif proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
                         pass
                     else:
                         proximo_estado_sugerido = None
@@ -3861,7 +3901,9 @@ def process_message_logic(author, messages_to_process):
                     nuevo_contexto['reply_guard_until_ts'] = now_ts + guard_window
                     contexto_limpio = _clean_context_for_firestore(nuevo_contexto)
                     # Persistir inmediatamente el guard para coordinación entre procesos
-                    memory.update_conversation_state(author, current_state, context=contexto_limpio)
+                    # Importante: no sobrescribir el estado actual si la acción ya movió a AGENDA
+                    estado_guard = (sc_latest or {}).get('current_state', current_state)
+                    memory.update_conversation_state(author, estado_guard, context=contexto_limpio)
                     msgio_handler.send_whatsapp_message(phone_number=author.split('@')[0], message=respuesta_final)
                     memory.add_to_conversation_history(author, "user", sender_name, user_message_for_history, context=contexto_limpio, history=history)
                     memory.add_to_conversation_history(author, "assistant", "RODI", respuesta_final, name="RODI", context=contexto_limpio, history=history)

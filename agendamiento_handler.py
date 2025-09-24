@@ -846,6 +846,11 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
     fecha_deseada = state_context.get('fecha_deseada')
     preferencia_horaria = state_context.get('preferencia_horaria')
     restricciones_temporales = state_context.get('restricciones_temporales')
+    # Log de filtros recibidos (alta señal)
+    try:
+        logger.info(f"[AGENDA_FILTROS] Entrantes → fecha={fecha_deseada}, hora={state_context.get('hora_especifica')}, pref={preferencia_horaria}")
+    except Exception:
+        pass
     
     # NUEVA MEJORA: Logging detallado de la información de fecha
     logger.info(f"[MOSTRAR_TURNOS] Información de fecha del contexto - fecha_deseada: {fecha_deseada}, preferencia_horaria: {preferencia_horaria}, restricciones: {restricciones_temporales}")
@@ -865,6 +870,10 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
         available_slots = utils.get_available_slots_catalog_with_cache(
             author, fecha_deseada, max_slots=5, preferencia_horaria=preferencia_horaria, hora_especifica=hora_especifica
         )
+        try:
+            logger.info(f"[AGENDA_SLOTS] Devueltos por caché → {len(available_slots)}")
+        except Exception:
+            pass
         
         # NUEVA MEJORA: Filtrar slots según restricciones temporales y preferencia horaria
         if restricciones_temporales or preferencia_horaria:

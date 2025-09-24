@@ -846,7 +846,8 @@ def limpiar_contexto_pagos_unificado(context):
         context_limpio.pop(campo, None)
     
     # Mantener solo información esencial
-    context_limpio['current_state'] = 'preguntando'
+    # Mantener estado actual si existe; si no, volver a 'conversando'
+    context_limpio['current_state'] = context.get('current_state') or 'conversando'
     
     logger.info(f"[LIMPIEZA_PAGOS] Contexto limpiado agresivamente (sin catálogos)")
     return context_limpio
@@ -881,7 +882,8 @@ def limpiar_contexto_agendamiento_unificado(context):
         context_limpio.pop(campo, None)
     
     # Mantener solo información esencial
-    context_limpio['current_state'] = 'preguntando'
+    # Mantener estado actual si existe; si no, volver a 'conversando'
+    context_limpio['current_state'] = context.get('current_state') or 'conversando'
     
     logger.info(f"[LIMPIEZA_AGENDA] Contexto limpiado preservando información de la IA")
     return context_limpio

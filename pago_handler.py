@@ -127,7 +127,8 @@ def _manejar_interrupcion_pago(history, detalles, state_context, mensaje_usuario
     })
     
     if is_valid_doc_id(author):
-        memory.update_conversation_state(author, 'preguntando', contexto_guardar)
+        estado_objetivo = state_context.get('current_state') or 'PAGOS_ESPERANDO_CONFIRMACION'
+        memory.update_conversation_state(author, estado_objetivo, contexto_guardar)
     
     # Mensaje para el cliente
     mensaje = "**Perfecto, te ayudo con tu pregunta.**\n\n"
@@ -269,7 +270,7 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             'proveedor': provider or 'MERCADOPAGO'
         })
         if is_valid_doc_id(author):
-            memory.update_conversation_state(author, 'esperando_confirmacion_pago', contexto_guardar)
+            memory.update_conversation_state(author, 'PAGOS_ESPERANDO_CONFIRMACION', contexto_guardar)
         else:
             logger.critical(f"[MEMORY] No se puede actualizar estado: author/doc_id inválido para {author} en iniciar_pago. Contexto: {contexto_guardar}")
         return mensaje, contexto_guardar
@@ -318,7 +319,7 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             'proveedor': provider
         })
         if is_valid_doc_id(author):
-            memory.update_conversation_state(author, 'esperando_confirmacion_pago', contexto_guardar)
+            memory.update_conversation_state(author, 'PAGOS_ESPERANDO_CONFIRMACION', contexto_guardar)
         else:
             logger.critical(f"[MEMORY] No se puede actualizar estado: author/doc_id inválido para {author} en iniciar_pago. Contexto: {contexto_guardar}")
         return mensaje, contexto_guardar
@@ -369,7 +370,7 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
             'link_pago': None
         })
         if is_valid_doc_id(author):
-            memory.update_conversation_state(author, 'esperando_confirmacion_pago', contexto_guardar)
+            memory.update_conversation_state(author, 'PAGOS_ESPERANDO_CONFIRMACION', contexto_guardar)
         else:
             logger.critical(f"[MEMORY] No se puede actualizar estado: author/doc_id inválido para {author} en iniciar_pago. Contexto: {contexto_guardar}")
         return mensaje, contexto_guardar
@@ -397,7 +398,7 @@ def iniciar_pago(history, detalles, state_context=None, mensaje_completo_usuario
         'link_pago': mensaje
     })
     if is_valid_doc_id(author):
-        memory.update_conversation_state(author, 'esperando_confirmacion_pago', contexto_guardar)
+        memory.update_conversation_state(author, 'PAGOS_ESPERANDO_CONFIRMACION', contexto_guardar)
     else:
         logger.critical(f"[MEMORY] No se puede actualizar estado: author/doc_id inválido para {author} en iniciar_pago. Contexto: {contexto_guardar}")
     return mensaje, contexto_guardar

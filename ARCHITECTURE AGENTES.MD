@@ -116,7 +116,7 @@ Este documento describe, de forma operativa y completa, cómo el sistema procesa
 ### 11. Estados estándar
 - Agendamiento: `AGENDA_MOSTRANDO_OPCIONES`, `AGENDA_CONFIRMANDO_TURNO`, `AGENDA_REPROGRAMACION_*`, `evento_creado`.
 - Pagos: `PAGOS_ESPERANDO_SELECCION_SERVICIO`, `PAGOS_ESPERANDO_CONFIRMACION`, `conversando`.
-- Globales suaves: `preguntando`, `conversando`.
+- Estado base: `conversando` (no se usa `preguntando`).
 - Lock Agente Cero: `pasado_a_departamento=True` durante 48h tras iniciar triage.
 
 ### 12. Casos clave (cómo se resuelven)

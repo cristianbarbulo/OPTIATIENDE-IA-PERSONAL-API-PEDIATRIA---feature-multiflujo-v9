@@ -308,7 +308,7 @@ graph TD
     F -->|No| H[Procesar mensaje único]
     G --> I[Reconstruir mensaje usuario]
     H --> I
-    I --> J[Agente Cero - Clasificación inicial]
+    I --> J[Agente Cero - Clasificación]
     J --> K{¿Debe pasar a departamento?}
     K -->|Sí| L[Meta-Agente - Determinar dominio]
     K -->|No| M[Agente Conversacional]
@@ -643,11 +643,11 @@ def apilar_contexto(phone_number, estado, contexto):
 ```
 
 #### Sistema de estados
-**Estados posibles**:
-- `INITIAL`: Usuario nuevo o conversación reiniciada
-- `preguntando`: Conversación general activa
+**Estados vigentes**:
+- `conversando`: Conversación general sin flujo activo
 - `AGENDA_MOSTRANDO_OPCIONES`: Mostrando turnos disponibles
 - `PAGOS_ESPERANDO_SELECCION_SERVICIO`: Esperando selección de servicio
+- `PAGOS_ESPERANDO_CONFIRMACION`: Esperando confirmación de servicio
 - `AGENDA_ESPERANDO_CONFIRMACION_FINAL`: Esperando confirmación de turno
 
 #### Caché local vs base de datos
