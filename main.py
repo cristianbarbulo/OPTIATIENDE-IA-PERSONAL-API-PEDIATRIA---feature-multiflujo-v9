@@ -1070,6 +1070,30 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
     if hay_agenda_activa and 'agendamiento_handler' in globals():
         logger.info(f"[WRAPPER_PREGUNTAR] BLINDAJE AGENDA - Solo botones permitidos")
         
+        # Intentar extraer fecha/hora/preferencia directamente del mensaje del usuario
+        try:
+            from utils import parsear_fecha_hora_natural as _parse_fecha_hora
+            parsed = _parse_fecha_hora(mensaje_completo_usuario or "", return_details=True) or {}
+            if parsed:
+                fecha_dt = parsed.get('fecha_datetime')
+                fecha_iso = parsed.get('fecha_iso')
+                hora_parseada = parsed.get('hora')
+                preferencia_horaria_msg = parsed.get('preferencia_horaria')
+                restricciones_msg = parsed.get('restricciones_temporales') or []
+                if fecha_dt:
+                    state_context['fecha_deseada'] = fecha_dt.strftime('%Y-%m-%d')
+                elif fecha_iso:
+                    state_context['fecha_deseada'] = fecha_iso
+                if hora_parseada:
+                    state_context['hora_especifica'] = hora_parseada
+                if preferencia_horaria_msg:
+                    state_context['preferencia_horaria'] = preferencia_horaria_msg
+                if restricciones_msg:
+                    existentes = list(state_context.get('restricciones_temporales', []) or [])
+                    state_context['restricciones_temporales'] = existentes + restricciones_msg
+        except Exception as _e:
+            logger.warning(f"[AGENDA_PARSE] Error parseando fecha/hora natural: {_e}")
+
         # BLINDAJE V10: En agenda, NUNCA usar Agente Cero, SIEMPRE botones
         # Si hay nueva fecha en detalles, ejecutar nuevo triage
         detalles_actuales = detalles or {}
@@ -3503,6 +3527,18 @@ def process_message_logic(author, messages_to_process):
         # Obtener contexto ANTES de reconstruir mensaje para incluir multimedia procesada
         history, _, current_state, state_context = memory.get_conversation_data(phone_number=author)
         logger.info(f"[CONTEXTO] Contexto leído para {author}: {state_context}")
+
+        # Enforzar lock de departamento cuando hay flujo activo para evitar llamar Agente Cero
+        try:
+            sc_cs = (state_context or {}).get('current_state', '') or ''
+            if sc_cs.startswith('PAGOS_') or sc_cs.startswith('AGENDA_'):
+                if not (state_context or {}).get('pasado_a_departamento'):
+                    state_context = state_context or {}
+                    state_context['pasado_a_departamento'] = True
+                    memory.update_conversation_state(author, sc_cs or current_state, context=_clean_context_for_firestore(state_context))
+                    logger.info(f"[GUARD_FLOW] Forzado pasado_a_departamento=True por flujo activo ({sc_cs})")
+        except Exception as _e:
+            logger.warning(f"[GUARD_FLOW] No se pudo aplicar guard de lock de flujo: {_e}")
 
         # Hidratar vendor_owner en state_context si existe en Firestore (etiqueta invisible y persistente)
         try:
