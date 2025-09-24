@@ -764,9 +764,6 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             estrategia["accion_recomendada"] = "preguntar"
             datos_extraidos.clear()  # ignorar extracción que cambie de dominio
             logger.info(f"[ESTRATEGIA] 🔒 Flujo activo -> forzar 'preguntar' y mantener dominio")
-        if current_state and (current_state.startswith('PAGOS_') or current_state.startswith('AGENDA_')):
-            estrategia["accion_recomendada"] = "preguntar"
-            logger.info(f"[ESTRATEGIA] 🔒 Flujo activo detectado. Forzando 'preguntar' (sin cambio de dominio)")
         
         logger.info(f"[ESTRATEGIA] Estrategia construida desde Meta-Agente: {estrategia}")
 
@@ -823,11 +820,11 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
         # MENSAJE EDUCATIVO según el contexto actual
         current_state = state_context.get('current_state', '') if state_context else ''
         if current_state.startswith('PAGOS_'):
-            mensaje_educativo = "Estás en el flujo de pagos. Para salir, escribí: SALIR DE PAGO"
+            mensaje_educativo = f"{config.COMMAND_TIPS['GEN_PROBLEMA_PAGO']} Para salir y volver al inicio, {config.COMMAND_TIPS['EXIT_PAGO']}"
         elif current_state.startswith('AGENDA_'):
-            mensaje_educativo = "Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA"
+            mensaje_educativo = f"{config.COMMAND_TIPS['GEN_PROBLEMA_AGENDA']} Para salir y volver al inicio, {config.COMMAND_TIPS['EXIT_AGENDA']}"
         else:
-            mensaje_educativo = "Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR"
+            mensaje_educativo = f"Tuve un problema técnico. {config.COMMAND_TIPS['ENTER_AGENDA']}. {config.COMMAND_TIPS['ENTER_PAGO']}"
         
         return mensaje_educativo, state_context
     
@@ -861,8 +858,8 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
                         author=author
                     )
                 except Exception:
-                    return ("Estás en el flujo de pagos. Para continuar elegí un servicio. \n"
-                            "Para salir, escribí: SALIR DE PAGO"), state_context
+                    return (f"Estás en el flujo de pagos. Para continuar elegí un servicio. \n"
+                            f"{config.COMMAND_TIPS['EXIT_PAGO']}") , state_context
         elif current_state_local.startswith('AGENDA_'):
             if accion_limpia not in acciones_permitidas_agenda:
                 logger.info("[BLINDAJE_EJECUTAR] En flujo AGENDA: bloqueo de acción fuera de dominio. Reforzando UI de agenda")
@@ -877,10 +874,10 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
                     )
                     if resultado is None:
                         return None, nuevo_state
-                    return ("Estás en el flujo de agendamiento. Elegí un turno de la lista anterior. \n"
-                            "Para salir, escribí: SALIR DE AGENDA"), nuevo_state
+                    return (f"Estás en el flujo de agendamiento. Elegí un turno de la lista anterior. \n"
+                            f"{config.COMMAND_TIPS['EXIT_AGENDA']}") , nuevo_state
                 except Exception:
-                    return ("Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA"), state_context
+                    return (f"Estás en el flujo de agendamiento. {config.COMMAND_TIPS['EXIT_AGENDA']}") , state_context
     except Exception as _e:
         logger.warning(f"[BLINDAJE_EJECUTAR] No se pudo aplicar el guard de dominio: {_e}")
 
@@ -902,22 +899,13 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
         # MENSAJE EDUCATIVO según el contexto actual
         current_state = state_context.get('current_state', '') if state_context else ''
         if current_state.startswith('PAGOS_'):
-            mensaje_educativo = "Estoy teniendo problemas en el flujo de pagos. Para salir y volver al inicio, escribí: SALIR DE PAGO"
+            mensaje_educativo = f"Estoy teniendo problemas en el flujo de pagos. {config.COMMAND_TIPS['EXIT_PAGO']}"
         elif current_state.startswith('AGENDA_'):
-            mensaje_educativo = "Estoy teniendo problemas en el flujo de agendamiento. Para salir y volver al inicio, escribí: SALIR DE AGENDA"
+            mensaje_educativo = f"Estoy teniendo problemas en el flujo de agendamiento. {config.COMMAND_TIPS['EXIT_AGENDA']}"
         else:
-            mensaje_educativo = "Tuve un problema técnico. Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR"
+            mensaje_educativo = f"Tuve un problema técnico. {config.COMMAND_TIPS['ENTER_AGENDA']}. {config.COMMAND_TIPS['ENTER_PAGO']}"
         
         return mensaje_educativo, state_context
-
-# --- LISTA DE INTENCIONES VÁLIDAS ---
-INTENCIONES_VALIDAS = [
-    # AGENDAMIENTO
-    "agendar", "seleccionar_turno", "reprogramar", "confirmar_turno", "cancelar", "confirmar_cancelacion", "preguntar", "escalar_a_humano",
-    # PAGOS
-    "pagar", "seleccionar_servicio", "confirmar_servicio", "generar_link", "confirmar_pago", "preguntar", "escalar_a_humano"
-]
-
 
 # --- Wrapper para la acción 'preguntar' ---
 def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario, author=None):
@@ -1064,8 +1052,8 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             # Educar al usuario para salir explícitamente del flujo.
             if state_context.get('payment_verified'):
                 return (
-                    "Tu pago ya está verificado. Para salir del flujo de pagos y continuar, escribí: SALIR DE PAGO.\n\n"
-                    "Luego, para entrar a agendamiento, escribí: QUIERO AGENDAR.",
+                    f"Tu pago ya está verificado. {config.COMMAND_TIPS['EXIT_PAGO']}.\n\n"
+                    f"Luego, {config.COMMAND_TIPS['ENTER_AGENDA']}.",
                     state_context
                 )
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
@@ -1074,7 +1062,7 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             return pago_handler.mostrar_servicios_pago(history, detalles or {}, state_context, mensaje_completo_usuario, author)
         except Exception as e:
             logger.error(f"[BLINDAJE_PAGOS] Error crítico: {e}")
-            return "Para continuar en pagos, elegí un servicio de la lista anterior. Para salir, escribí: SALIR DE PAGO", state_context
+            return f"Para continuar en pagos, elegí un servicio de la lista anterior. {config.COMMAND_TIPS['EXIT_PAGO']}", state_context
 
     # 2) AGENDA: BLINDAJE TOTAL - SOLO BOTONES, NUNCA TEXTO CONVERSACIONAL
     if hay_agenda_activa and 'agendamiento_handler' in globals():
@@ -1120,10 +1108,10 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
                 else:
                     # Si devuelve texto (fallback), convertir a botón educativo
                     logger.warning(f"[BLINDAJE_AGENDA] Texto detectado - Convirtiendo a mensaje educativo")
-                    return "Para continuar en agendamiento, elegí un turno de la lista anterior. Para salir, escribí: SALIR DE AGENDA", nuevo_state
+                    return f"Para continuar en agendamiento, elegí un turno de la lista anterior. {config.COMMAND_TIPS['EXIT_AGENDA']}", nuevo_state
             except Exception as e:
                 logger.error(f"[BLINDAJE_AGENDA] Error crítico: {e}")
-                return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+                return f"Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
 
     # 3) Sin flujo activo o estado final: usar Agente Cero conversacional
     logger.info(f"[WRAPPER_PREGUNTAR] Sin flujo activo - Usando Agente Cero conversacional")
@@ -3743,49 +3731,71 @@ def process_message_logic(author, messages_to_process):
                     logger.warning(f"[AGENTE_CERO_LOCK] No se pudo persistir el lock previo a la acción '{accion}': {e}")
             logger.info(f"[EJECUTAR] Ejecutando acción '{accion}' para {author}")
             respuesta_final, nuevo_contexto = _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_usuario, author)
-            
-        # CORRECCIÓN CRÍTICA: Guardar contexto inmediatamente después de ejecutar la acción
-        if nuevo_contexto and nuevo_contexto != state_context:
-            logger.info(f"[CONTEXTO] Guardando contexto actualizado inmediatamente para {author}")
-            estado_a_persistir_post = (nuevo_contexto or {}).get('current_state', current_state)
-            memory.update_conversation_state(author, estado_a_persistir_post, context=_clean_context_for_firestore(nuevo_contexto))
+
+            # APLICAR BLINDAJE DE SALIDA SOBRE EL NUEVO CONTEXTO ANTES DE PERSISTIR
+            context_to_commit = nuevo_contexto if nuevo_contexto is not None else state_context
+            try:
+                current_state_before = (state_context or {}).get('current_state', '') or ''
+                requested_state = (context_to_commit or {}).get('current_state') or (estrategia or {}).get('proximo_estado_sugerido')
+                texto_usuario_uc = (mensaje_completo_usuario or '').upper()
+                if current_state_before.startswith('PAGOS_'):
+                    if requested_state and not str(requested_state).startswith('PAGOS_'):
+                        if requested_state == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc) and (context_to_commit or {}).get('payment_verified'):
+                            pass
+                        else:
+                            logger.info(f"[BLINDAJE_ESTADO] Rechazando salida de PAGOS: '{current_state_before}' → '{requested_state}'")
+                            requested_state = None
+                elif current_state_before.startswith('AGENDA_'):
+                    if requested_state and not str(requested_state).startswith('AGENDA_'):
+                        if requested_state == 'conversando' and ('SALIR DE AGENDA' in texto_usuario_uc):
+                            pass
+                        else:
+                            logger.info(f"[BLINDAJE_ESTADO] Rechazando salida de AGENDA: '{current_state_before}' → '{requested_state}'")
+                            requested_state = None
+                # Aplicar decisión final sobre el contexto a persistir
+                if requested_state:
+                    context_to_commit['current_state'] = requested_state
+                else:
+                    context_to_commit['current_state'] = current_state_before
+            except Exception as _e:
+                logger.warning(f"[BLINDAJE_ESTADO] No se pudo aplicar guard previo al commit: {_e}")
+
+            # Guardar contexto actualizado tras aplicar blindaje
+            if context_to_commit and context_to_commit != state_context:
+                logger.info(f"[CONTEXTO] Guardando contexto actualizado (con blindaje aplicado) para {author}")
+                estado_a_persistir_post = (context_to_commit or {}).get('current_state', current_state)
+                memory.update_conversation_state(author, estado_a_persistir_post, context=_clean_context_for_firestore(context_to_commit))
         elif not respuesta_final:
             logger.warning(f"[ORQUESTADOR] No se pudo determinar una acción para '{mensaje_completo_usuario}'")
             
             # MENSAJE EDUCATIVO según el contexto actual
             current_state = state_context.get('current_state', '') if state_context else ''
             if current_state.startswith('PAGOS_'):
-                respuesta_final = "Estás en el flujo de pagos. Para continuar, seleccioná una opción o escribí: SALIR DE PAGO para volver al inicio."
+                respuesta_final = f"Estás en el flujo de pagos. Para continuar, seleccioná una opción. {config.COMMAND_TIPS['EXIT_PAGO']} para volver al inicio."
             elif current_state.startswith('AGENDA_'):
-                respuesta_final = "Estás en el flujo de agendamiento. Para continuar, seleccioná un turno o escribí: SALIR DE AGENDA para volver al inicio."
+                respuesta_final = f"Estás en el flujo de agendamiento. Para continuar, seleccioná un turno. {config.COMMAND_TIPS['EXIT_AGENDA']} para volver al inicio."
             else:
-                respuesta_final = "Para agendar turnos, escribí: QUIERO AGENDAR. Para consultar servicios, escribí: QUIERO PAGAR. ¿En qué puedo ayudarte?"
+                respuesta_final = f"{config.COMMAND_TIPS['ENTER_AGENDA']}. {config.COMMAND_TIPS['ENTER_PAGO']}. {config.COMMAND_TIPS['GEN_INICIO']}"
             
             if nuevo_contexto is None:
                 nuevo_contexto = state_context
 
         proximo_estado_sugerido = (nuevo_contexto or {}).get('current_state') or (estrategia or {}).get('proximo_estado_sugerido')
-        # BLINDAJE DE COMMIT DE ESTADO: no salir de flujos sin comando explícito
+        # BLINDAJE DE COMMIT DE ESTADO (redundante por seguridad): no salir de flujos sin comando explícito
         try:
             current_state_local = (state_context or {}).get('current_state', '') or ''
             texto_usuario_uc = (mensaje_completo_usuario or '').upper()
             if current_state_local.startswith('PAGOS_'):
                 if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('PAGOS_'):
-                    # Solo permitimos salir a 'conversando' con comando explícito
                     if proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
-                        # Reglas adicionales: permitir solo si hay pago verificado
-                        if not ((nuevo_contexto or {}).get('payment_verified')):
-                            logger.info("[BLINDAJE_ESTADO] Cambio a 'conversando' rechazado: pago no verificado")
-                            proximo_estado_sugerido = None
+                        pass
                     else:
-                        logger.info(f"[BLINDAJE_ESTADO] Ignorando cambio de estado fuera de PAGOS desde '{current_state_local}' a '{proximo_estado_sugerido}' sin 'SALIR DE PAGO'")
                         proximo_estado_sugerido = None
             elif current_state_local.startswith('AGENDA_'):
                 if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('AGENDA_'):
                     if proximo_estado_sugerido == 'conversando' and ('SALIR DE AGENDA' in texto_usuario_uc):
                         pass
                     else:
-                        logger.info(f"[BLINDAJE_ESTADO] Ignorando cambio de estado fuera de AGENDA desde '{current_state_local}' a '{proximo_estado_sugerido}' sin 'SALIR DE AGENDA'")
                         proximo_estado_sugerido = None
         except Exception as _e:
             logger.warning(f"[BLINDAJE_ESTADO] No se pudo evaluar el guard de estado: {_e}")

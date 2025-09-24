@@ -307,7 +307,7 @@ def _mostrar_no_turnos_disponibles_con_botones(author, state_context, tipo_agend
         # Fallback: mantener en agenda con mensaje educativo
         logger.error(f"[NO_TURNOS] Error enviando botones para {author}")
         state_context['current_state'] = 'AGENDA_MOSTRANDO_OPCIONES'
-        return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
+        return f"{config.COMMAND_TIPS['EXIT_AGENDA']}", state_context
 
 def _mostrar_confirmacion_turno_con_botones(slot_seleccionado, state_context, author):
     """

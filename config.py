@@ -229,6 +229,17 @@ try:
         }
     }
 
+    # Mensajes centralizados de comandos (educación y navegación)
+    COMMAND_TIPS = {
+        'ENTER_AGENDA': os.getenv('CMD_ENTER_AGENDA', 'Para agendar, escribí: QUIERO AGENDAR'),
+        'ENTER_PAGO': os.getenv('CMD_ENTER_PAGO', 'Para pagos, escribí: QUIERO PAGAR'),
+        'EXIT_AGENDA': os.getenv('CMD_EXIT_AGENDA', 'Para salir del agendamiento, escribí: SALIR DE AGENDA'),
+        'EXIT_PAGO': os.getenv('CMD_EXIT_PAGO', 'Para salir de pagos, escribí: SALIR DE PAGO'),
+        'GEN_PROBLEMA_PAGO': os.getenv('CMD_PROBLEMA_PAGO', 'Estoy teniendo problemas en el flujo de pagos.'),
+        'GEN_PROBLEMA_AGENDA': os.getenv('CMD_PROBLEMA_AGENDA', 'Estoy teniendo problemas en el flujo de agendamiento.'),
+        'GEN_INICIO': os.getenv('CMD_GEN_INICIO', '¿En qué puedo ayudarte?')
+    }
+
     # NUEVO: Configuración de zona horaria corregida
     TIMEZONE_CONFIG = {
         'zona_horaria': 'America/Argentina/Buenos_Aires',

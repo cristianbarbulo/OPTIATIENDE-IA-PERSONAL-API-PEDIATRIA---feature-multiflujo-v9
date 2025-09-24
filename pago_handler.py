@@ -968,7 +968,7 @@ def confirmar_servicio_pago(history, detalles, state_context=None, mensaje_compl
     precio = servicio_seleccionado.get('precio', 'Consultar')
     
     # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
-    mensaje_confirmacion = f"Seleccionaste '{nombre}' por ${precio}. ¿Es correcto?\n\nPara salir de pagos, escribí: SALIR DE PAGO"
+    mensaje_confirmacion = f"Seleccionaste '{nombre}' por ${precio}. ¿Es correcto?\n\n{config.COMMAND_TIPS['EXIT_PAGO']}"
     
     # Crear botones de confirmación
     botones_confirmacion = [
