@@ -712,19 +712,9 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
     # MANEJO DE DECISIONES DEL META-AGENTE
     decision = meta_resultado.get("decision", "AGENTE_CERO")
     
-    # Comando SALIR - limpiar estado y pasar al Agente Cero (con reglas estrictas)
+    # Comando SALIR - limpiar estado y pasar al Agente Cero (siempre permitido)
     if decision in ["SALIR_PAGOS", "SALIR_AGENDAMIENTO"]:
         logger.info(f"[ESTRATEGIA] Comando SALIR detectado: {decision}")
-        # Reglas específicas de salida
-        if decision == "SALIR_PAGOS":
-            pago_verificado = bool((state_context or {}).get('payment_verified'))
-            if not pago_verificado:
-                logger.info("[ESTRATEGIA] Comando SALIR DE PAGO rechazado: pago no verificado")
-                # Mantenerse en pagos: forzar 'preguntar' y no cambiar dominio
-                return {
-                    "accion_recomendada": "preguntar",
-                    "detalles": {"dominio_sugerido": "PAGOS", "motivo": "salida_rechazada_pago_no_verificado"}
-                }
         # Limpiar estado completamente y volver al Agente Cero
         state_context = {
             'author': state_context.get('author'),
@@ -837,13 +827,20 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
             'preguntar',
             'iniciar_triage_pagos', 'mostrar_servicios_pago', 'generar_link_pago',
             'confirmar_servicio_pago', 'confirmar_pago', 'reanudar_flujo_anterior',
-            'salir_de_pago'
+            'salir_de_pago', 'volver_agente_cero'
         }
+        # EXCEPCIÓN: si el pago está verificado, permitir saltar a agendamiento
+        try:
+            if (state_context or {}).get('payment_verified'):
+                acciones_permitidas_pagos.update({'iniciar_triage_agendamiento', 'mostrar_opciones_turnos'})
+        except Exception:
+            pass
+
         acciones_permitidas_agenda = {
             'preguntar',
             'iniciar_agendamiento', 'iniciar_triage_agendamiento', 'mostrar_opciones_turnos',
             'seleccionar_turno', 'confirmar_turno', 'reprogramar', 'cancelar',
-            'confirmar_cancelacion', 'reanudar_flujo_anterior', 'salir_de_agenda'
+            'confirmar_cancelacion', 'reanudar_flujo_anterior', 'salir_de_agenda', 'volver_agente_cero'
         }
         if current_state_local.startswith('PAGOS_'):
             if accion_limpia not in acciones_permitidas_pagos:
@@ -1051,10 +1048,15 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             # Si el pago ya está verificado, no hay nada más que hacer en pagos.
             # Educar al usuario para salir explícitamente del flujo.
             if state_context.get('payment_verified'):
-                return (
-                    f"Tu pago ya está verificado. {config.COMMAND_TIPS['EXIT_PAGO']}.\n\n"
-                    f"Luego, {config.COMMAND_TIPS['ENTER_AGENDA']}.",
-                    state_context
+                # Regla de negocio: pago verificado permite saltar directo a agendamiento sin frase
+                logger.info("[BLINDAJE_PAGOS] Pago verificado: iniciando agendamiento automáticamente")
+                return _ejecutar_accion(
+                    'iniciar_triage_agendamiento',
+                    history,
+                    detalles or {},
+                    state_context,
+                    mensaje_completo_usuario,
+                    author
                 )
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
             if current_state_sc == 'PAGOS_ESPERANDO_CONFIRMACION':
