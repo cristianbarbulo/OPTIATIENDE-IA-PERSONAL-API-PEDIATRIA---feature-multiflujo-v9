@@ -3806,6 +3806,17 @@ def process_message_logic(author, messages_to_process):
 
             # APLICAR BLINDAJE DE SALIDA SOBRE EL NUEVO CONTEXTO ANTES DE PERSISTIR
             context_to_commit = nuevo_contexto if nuevo_contexto is not None else state_context
+            # PRESERVAR CAMPOS CRÍTICOS DEL CONTEXTO ANTERIOR (no perder flags como payment_verified)
+            try:
+                if isinstance(state_context, dict) and isinstance(context_to_commit, dict):
+                    for clave in [
+                        'payment_verified', 'payment_status', 'payment_amount',
+                        'pasado_a_departamento', 'author', 'senderName'
+                    ]:
+                        if clave in state_context and clave not in context_to_commit:
+                            context_to_commit[clave] = state_context[clave]
+            except Exception as _e:
+                logger.warning(f"[CONTEXTO] No se pudieron preservar campos críticos: {_e}")
             try:
                 current_state_before = (state_context or {}).get('current_state', '') or ''
                 requested_state = (context_to_commit or {}).get('current_state') or (estrategia or {}).get('proximo_estado_sugerido')
@@ -3815,7 +3826,7 @@ def process_message_logic(author, messages_to_process):
                         # Permitir transicionar a AGENDA_* si el pago está verificado (auto-agenda)
                         if (str(requested_state).startswith('AGENDA_') and (context_to_commit or {}).get('payment_verified')):
                             logger.info(f"[BLINDAJE_ESTADO] Permitida salida de PAGOS→AGENDA por pago verificado: '{current_state_before}' → '{requested_state}'")
-                        elif requested_state == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
+                        elif requested_state == 'conversando' and (('SALIR DE PAGO' in texto_usuario_uc) or ('SALIR DE AGENDA' in texto_usuario_uc)):
                             pass
                         else:
                             logger.info(f"[BLINDAJE_ESTADO] Rechazando salida de PAGOS: '{current_state_before}' → '{requested_state}'")
@@ -3865,7 +3876,7 @@ def process_message_logic(author, messages_to_process):
                     # Permitir transición a AGENDA_* si el pago ya está verificado
                     if proximo_estado_sugerido.startswith('AGENDA_') and (state_context or {}).get('payment_verified'):
                         pass
-                    elif proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
+                    elif proximo_estado_sugerido == 'conversando' and (('SALIR DE PAGO' in texto_usuario_uc) or ('SALIR DE AGENDA' in texto_usuario_uc)):
                         pass
                     else:
                         proximo_estado_sugerido = None

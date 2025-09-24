@@ -1001,12 +1001,15 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
         }
         interactive_payload["action"]["sections"][0]["rows"].append(row)
     
-    # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
+    # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS (Agenda)
     mensaje_principal = (
+        "🤖 Estás con el Agente de Agenda.\n"
+        "- Este agente está preparado para ayudarte a reservar tu turno.\n"
+        f"- Si querés hacer otra consulta, primero {config.COMMAND_TIPS['EXIT_AGENDA']}.\n\n"
         "📅 Turnos disponibles.\n"
         "- Tocá 'Ver Turnos' y elegí.\n"
-        "- Para salir del agendamiento, escribí: SALIR DE AGENDA\n"
-        "- Si no te sirven estos turnos, decime el día en número (ej: 06/08) y si tenés preferencia de horario."
+        "- También podés escribir tu preferencia: '10/11 a las 10', 'lunes por la tarde', 'mañana 9:00'.\n"
+        "- Si no te sirven estos turnos, indicame el día (DD/MM) y horario preferido y te muestro opciones."
     )
     titulo_lista = "Ver Turnos"
     titulo_seccion = "Turnos Disponibles"

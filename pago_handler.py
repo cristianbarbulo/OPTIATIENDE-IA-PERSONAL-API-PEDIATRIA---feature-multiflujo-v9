@@ -802,9 +802,11 @@ def mostrar_servicios_pago(history, detalles, state_context=None, mensaje_comple
     
     # MENSAJE EDUCATIVO CON COMANDOS EXPLÍCITOS
     mensaje_principal = (
+        "🤖 Estás interactuando con el Agente de Pago.\n"
+        "- Este agente solo guía el proceso de pago.\n"
+        f"- Para otras consultas, primero {config.COMMAND_TIPS['EXIT_PAGO']}.\n\n"
         "💳 Elegí el servicio y te genero el link de pago.\n"
-        "- Tocá 'Elige un Servicio' y seleccioná.\n"
-        "- Para salir de pagos, escribí: SALIR DE PAGO\n\n"
+        "- Tocá 'Elige un Servicio' y seleccioná.\n\n"
         "📸 Una vez que pagues, enviá foto del comprobante donde se vea el monto."
     )
     titulo_lista = "Elige un Servicio"  # 17 caracteres
