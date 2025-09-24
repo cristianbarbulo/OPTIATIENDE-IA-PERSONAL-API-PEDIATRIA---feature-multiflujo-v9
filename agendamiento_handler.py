@@ -60,12 +60,21 @@ def iniciar_triage_agendamiento(history, detalles, state_context=None, mensaje_c
     fecha_deseada = None
     hora_especifica = None
     preferencia_horaria = None
+    restricciones_temporales = None
+    dia_semana_interes = None
     
     # Extraer información de fecha/hora de los detalles si está disponible
     if isinstance(detalles, dict):
         fecha_deseada = detalles.get('fecha_deseada')
         hora_especifica = detalles.get('hora_especifica')
         preferencia_horaria = detalles.get('preferencia_horaria')
+        restricciones_temporales = detalles.get('restricciones_temporales')
+        dia_semana_interes = detalles.get('dia_semana')
+        
+        if isinstance(fecha_deseada, datetime):
+            fecha_deseada = fecha_deseada.strftime('%Y-%m-%d')
+        if isinstance(hora_especifica, datetime):
+            hora_especifica = hora_especifica.strftime('%H:%M')
         logger.info(f"[TRIAGE_AGENDA] Información extraída de detalles - fecha: {fecha_deseada}, hora: {hora_especifica}, preferencia: {preferencia_horaria}")
     
     # CORRECCIÓN CRÍTICA: NO limpiar el contexto agresivamente, solo preservar información esencial
@@ -88,6 +97,12 @@ def iniciar_triage_agendamiento(history, detalles, state_context=None, mensaje_c
     if preferencia_horaria:
         state_context['preferencia_horaria'] = preferencia_horaria
         logger.info(f"[TRIAGE_AGENDA] Preferencia horaria agregada al contexto: {preferencia_horaria}")
+    if restricciones_temporales:
+        state_context['restricciones_temporales'] = restricciones_temporales
+        logger.info(f"[TRIAGE_AGENDA] Restricciones temporales agregadas: {restricciones_temporales}")
+    if dia_semana_interes and not fecha_deseada:
+        state_context['dia_semana_interes'] = dia_semana_interes
+        logger.info(f"[TRIAGE_AGENDA] Día de interés agregado al contexto: {dia_semana_interes}")
     
     # MEJORA CRÍTICA: Verificar si se debe forzar la lista
     forzar_lista = detalles.get('forzar_lista', False) if isinstance(detalles, dict) else False
@@ -132,6 +147,7 @@ def buscar_y_ofrecer_turnos(history, detalles, state_context=None, mensaje_compl
     # NUEVA MEJORA: Extracción de Fecha/Hora Flexible del mensaje del usuario
     fecha_deseada = None
     hora_especifica = None
+    preferencia_horaria = None
     
     # ELIMINADO: Extracción ahora la hace el Meta-Agente directamente
     # Los datos ya vienen extraídos en 'detalles' desde el Meta-Agente amplificado
@@ -140,11 +156,19 @@ def buscar_y_ofrecer_turnos(history, detalles, state_context=None, mensaje_compl
     if isinstance(detalles, dict):
         fecha_deseada = detalles.get('fecha_deseada') or fecha_deseada
         hora_especifica = detalles.get('hora_especifica') or hora_especifica
-        logger.info(f"[BUSCAR_TURNOS] Datos del Meta-Agente - fecha: {fecha_deseada}, hora: {hora_especifica}")
+        preferencia_horaria = detalles.get('preferencia_horaria') or state_context.get('preferencia_horaria')
+        if detalles.get('restricciones_temporales'):
+            state_context['restricciones_temporales'] = detalles.get('restricciones_temporales')
+        if detalles.get('dia_semana'):
+            state_context['dia_semana_interes'] = detalles.get('dia_semana')
+        logger.info(f"[BUSCAR_TURNOS] Datos del Meta-Agente - fecha: {fecha_deseada}, hora: {hora_especifica}, preferencia: {preferencia_horaria}")
     
     # Si no hay fecha del Meta-Agente, usar la del contexto o fecha actual
     if not fecha_deseada:
         fecha_deseada = state_context.get('fecha_deseada')
+        if not fecha_deseada and state_context.get('dia_semana_interes'):
+            fecha_deseada = utils.get_next_weekday_date(state_context['dia_semana_interes'])
+            logger.info(f"[BUSCAR_TURNOS] Usando próximo {state_context['dia_semana_interes']}: {fecha_deseada}")
         if not fecha_deseada:
             # NUEVA MEJORA: Si no hay contexto de fecha, usar fecha actual
             fecha_deseada = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
@@ -155,6 +179,8 @@ def buscar_y_ofrecer_turnos(history, detalles, state_context=None, mensaje_compl
         state_context['fecha_deseada'] = fecha_deseada
     if hora_especifica:
         state_context['hora_especifica'] = hora_especifica
+    if preferencia_horaria:
+        state_context['preferencia_horaria'] = preferencia_horaria
     
     # Lógica "Sin Contexto, Da lo Primero Disponible"
     if not fecha_deseada and not hora_especifica:
@@ -516,6 +542,9 @@ def mostrar_opciones_turnos_reprogramacion(history, detalles, state_context=None
         # También extraer de state_context si está disponible
         if state_context.get('restricciones_temporales'):
             restricciones_temporales.extend(state_context.get('restricciones_temporales'))
+        if not fecha_deseada and detalles.get('dia_semana'):
+            fecha_deseada = utils.get_next_weekday_date(detalles.get('dia_semana'))
+            logger.info(f"[MOSTRAR_TURNOS_REPROG] Ajustando fecha por día de semana {detalles.get('dia_semana')}: {fecha_deseada}")
     
     logger.info(f"[MOSTRAR_TURNOS_REPROG] Restricciones temporales detectadas: {restricciones_temporales}")
     
@@ -534,7 +563,13 @@ def mostrar_opciones_turnos_reprogramacion(history, detalles, state_context=None
         logger.error(f"[MOSTRAR_TURNOS_REPROG] Error obteniendo turnos con caché: {e}")
         # Fallback a función sin caché
         try:
-            available_slots = utils.get_available_slots_catalog(author, fecha_deseada, max_slots=5, hora_especifica=hora_especifica, preferencia_horaria=preferencia_horaria)
+            available_slots = utils.get_available_slots_catalog(
+                author,
+                fecha_deseada,
+                max_slots=5,
+                hora_especifica=hora_especifica,
+                preferencia_horaria=preferencia_horaria
+            )
         except Exception as e2:
             logger.error(f"[MOSTRAR_TURNOS_REPROG] Error catastrófico obteniendo turnos: {e2}")
             # NUEVA MEJORA: Mensaje genérico para el usuario sin exponer errores internos
@@ -784,7 +819,7 @@ def reanudar_agendamiento(history, detalles, state_context=None, mensaje_complet
         return ejecutar_reprogramacion_cita(history, detalles, state_context, mensaje_completo_usuario)
     else:
         # Estado no reconocido, reiniciar agendamiento
-        return iniciar_triage_agendamiento(history, detalles, state_context, mensaje_completo_usuario)
+        return iniciar_triage_agendamiento(history, detalles, state_context, mensaje_completo_usuario, author)
 
 def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_completo_usuario=None, author=None):
     """
@@ -810,17 +845,15 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
     
     fecha_deseada = state_context.get('fecha_deseada')
     preferencia_horaria = state_context.get('preferencia_horaria')
+    restricciones_temporales = state_context.get('restricciones_temporales')
     
     # NUEVA MEJORA: Logging detallado de la información de fecha
-    logger.info(f"[MOSTRAR_TURNOS] Información de fecha del contexto - fecha_deseada: {fecha_deseada}, preferencia_horaria: {preferencia_horaria}")
+    logger.info(f"[MOSTRAR_TURNOS] Información de fecha del contexto - fecha_deseada: {fecha_deseada}, preferencia_horaria: {preferencia_horaria}, restricciones: {restricciones_temporales}")
     
     # NUEVA MEJORA: Extraer restricciones temporales de los detalles
-    restricciones_temporales = []
-    if isinstance(detalles, dict):
-        restricciones_temporales = detalles.get('restricciones_temporales', [])
-        # También extraer de state_context si está disponible
-        if state_context.get('restricciones_temporales'):
-            restricciones_temporales.extend(state_context.get('restricciones_temporales'))
+    restricciones_temporales = restricciones_temporales or []
+    if isinstance(detalles, dict) and detalles.get('restricciones_temporales'):
+        restricciones_temporales.extend(detalles.get('restricciones_temporales', []))
     
     logger.info(f"[MOSTRAR_TURNOS] Restricciones temporales detectadas: {restricciones_temporales}")
     
@@ -841,7 +874,13 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
         logger.error(f"[MOSTRAR_TURNOS] Error obteniendo turnos con caché: {e}")
         # Fallback a función sin caché
         try:
-            available_slots = utils.get_available_slots_catalog(author, fecha_deseada, max_slots=5)
+            available_slots = utils.get_available_slots_catalog(
+                author,
+                fecha_deseada,
+                max_slots=5,
+                hora_especifica=hora_especifica,
+                preferencia_horaria=preferencia_horaria
+            )
         except Exception as e2:
             logger.error(f"[MOSTRAR_TURNOS] Error catastrófico obteniendo turnos: {e2}")
             # NUEVA MEJORA: Mensaje genérico para el usuario sin exponer errores internos
@@ -879,7 +918,6 @@ def mostrar_opciones_turnos(history, detalles, state_context=None, mensaje_compl
     
     opciones_lista = []
     for i, slot in enumerate(available_slots, 1):
-                # CORRECCIÓN CRÍTICA: Asegurar que slot sea un diccionario con las claves necesarias
         if isinstance(slot, dict):
             # Extraer fecha y hora del slot_iso para generar ID temporal
             try:

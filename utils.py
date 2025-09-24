@@ -13,10 +13,6 @@ import config
 
 logger = logging.getLogger(config.TENANT_NAME)
 
-# Se obtiene un logger con el nombre de este módulo. 
-# La configuración principal del logging se hará en main.py.
-logger = logging.getLogger(__name__)
-
 def get_media_url(media_id):
     """
     Obtiene la URL temporal de un archivo multimedia desde 360dialog.
@@ -516,167 +512,189 @@ def format_fecha_espanol(dt):
     mes = meses[dt.month - 1]
     return f"{dia} {dt.day} de {mes} a las {dt.strftime('%H:%M')} hs"
 
-def parsear_fecha_hora_natural(texto, preferencia_tz=None):
+def parsear_fecha_hora_natural(texto, preferencia_tz=None, return_details=False):
     """
-    Parsea fechas y horas expresadas en lenguaje natural a objetos datetime.
-    MEJORADO: Extracción más robusta y flexible de fechas y horas.
-    
+    Parsea fechas y horas expresadas en lenguaje natural.
+
     Args:
-        texto: Texto que contiene la fecha/hora en lenguaje natural
-        preferencia_tz: Zona horaria preferida (opcional)
-    
+        texto (str): Texto que contiene la fecha/hora en lenguaje natural.
+        preferencia_tz (str, opcional): Zona horaria preferida para dateparser.
+        return_details (bool, opcional): Si es True, devuelve un diccionario con metadatos
+            enriquecidos; si es False (comportamiento legado), devuelve una tupla
+            (fecha_datetime, hora_str) o None.
+
     Returns:
-        datetime object o None si no se puede parsear
+        dict | tuple | None: Diccionario con metadatos cuando return_details=True.
+            Caso contrario, tupla (datetime | None, str | None) o None si no se detecta nada.
     """
     try:
+        if not texto or not isinstance(texto, str):
+            return {} if return_details else None
+
         texto_lower = texto.lower()
-        hora_especifica = None
-        fecha_especifica = None
-        
-        # NUEVA MEJORA: Extraer hora específica con patrones más robustos
+        hora_str = None
+        hora_datetime = None
+        fecha_especifica_iso = None
+        fecha_datetime = None
+        preferencia_detectada = None
+        dia_semana_detectado = None
+        restricciones = []
+
+        # --- Extracción de hora explícita ---
         patrones_hora = [
-            r'a las (\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',  # "a las 15hs", "a las 3"
-            r'(\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',  # "15hs", "3"
-            r'(\d{1,2})\s*(hs?|horas?)\s*de\s*(mañana|tarde|noche)',  # "3 hs de tarde"
-            r'(\d{1,2})\s*de\s*(mañana|tarde|noche)',  # "3 de tarde"
-            r'(\d{1,2})\s*(hs?|horas?)\s*(de\s*la\s*)?(mañana|tarde|noche)',  # "3 hs de la tarde"
-            r'(\d{1,2})\s*(hs?|horas?)\s*(de\s*la\s*)?(mañana|tarde|noche)',  # "3 horas de la tarde"
+            r'a las (\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',
+            r'(\d{1,2})(?::(\d{2}))?\s*(hs?|horas?)?',
+            r'(\d{1,2})\s*(hs?|horas?)\s*de\s*(mañana|tarde|noche)',
+            r'(\d{1,2})\s*de\s*(mañana|tarde|noche)',
+            r'(\d{1,2})\s*(hs?|horas?)\s*(de\s*la\s*)?(mañana|tarde|noche)',
         ]
-        
+
         for patron in patrones_hora:
             match = re.search(patron, texto_lower)
             if match:
                 hora = int(match.group(1))
                 minutos = int(match.group(2)) if match.group(2) else 0
-                
-                # Ajustar hora según contexto (mañana/tarde/noche)
+
                 if 'tarde' in texto_lower and hora < 12:
                     hora += 12
+                    preferencia_detectada = preferencia_detectada or 'tarde'
                 elif 'noche' in texto_lower and hora < 12:
                     hora += 12
+                    preferencia_detectada = preferencia_detectada or 'noche'
                 elif 'mañana' in texto_lower and hora >= 12:
                     hora -= 12
-                
-                # Crear datetime con hora específica
-                hoy = datetime.now()
-                hora_especifica = hoy.replace(hour=hora, minute=minutos, second=0, microsecond=0)
-                logger.info(f"[UTILS] Hora específica extraída: {hora_especifica.strftime('%H:%M')}")
+                    preferencia_detectada = preferencia_detectada or 'mañana'
+
+                hora = max(0, min(23, hora))
+                minutos = max(0, min(59, minutos))
+                hora_str = f"{hora:02d}:{minutos:02d}"
+                hora_datetime = datetime.now().replace(hour=hora, minute=minutos, second=0, microsecond=0)
+                logger.info(f"[UTILS] Hora específica extraída: {hora_str}")
                 break
-        
-        # NUEVA MEJORA: Extraer preferencias horarias complejas
+
+        # --- Preferencias horarias generales ---
         preferencias_horarias = {
             'mediodía': 12,
             'mediodia': 12,
-            'mediodía': 12,
-            'tarde': 14,  # Hora representativa de la tarde
-            'mañana': 9,  # Hora representativa de la mañana
-            'noche': 20,  # Hora representativa de la noche
+            'tarde': 14,
+            'mañana': 9,
+            'noche': 20,
             'temprano': 8,
             'última hora': 18,
             'ultima hora': 18,
         }
-        
+
         for pref, hora_pref in preferencias_horarias.items():
             if pref in texto_lower:
-                if not hora_especifica:  # Solo si no se extrajo hora específica
-                    hoy = datetime.now()
-                    hora_especifica = hoy.replace(hour=hora_pref, minute=0, second=0, microsecond=0)
+                preferencia_detectada = preferencia_detectada or pref.split()[0]
+                if not hora_str:
+                    hora_str = f"{hora_pref:02d}:00"
+                    hora_datetime = datetime.now().replace(hour=hora_pref, minute=0, second=0, microsecond=0)
                     logger.info(f"[UTILS] Preferencia horaria extraída: {pref} -> {hora_pref}:00")
                 break
-        
-        # NUEVA MEJORA: Extraer restricciones temporales
-        restricciones = []
+
+        # --- Restricciones temporales ---
         if 'después de las' in texto_lower or 'después de la' in texto_lower:
             match = re.search(r'después de (?:las? )?(\d{1,2})', texto_lower)
             if match:
                 hora_limite = int(match.group(1))
                 restricciones.append(f"después_{hora_limite}")
                 logger.info(f"[UTILS] Restricción temporal extraída: después de las {hora_limite}")
-        
+
         if 'antes de las' in texto_lower or 'antes de la' in texto_lower:
             match = re.search(r'antes de (?:las? )?(\d{1,2})', texto_lower)
             if match:
                 hora_limite = int(match.group(1))
                 restricciones.append(f"antes_{hora_limite}")
                 logger.info(f"[UTILS] Restricción temporal extraída: antes de las {hora_limite}")
-        
-        # NUEVA MEJORA: Normalizar expresiones de fecha comunes (dd/mm, dd-mm, dd.mm)
-        # y detectar "próximo"/"siguiente" como sesgo al futuro
-        texto_norm = texto_lower
-        texto_norm = texto_norm.replace('proximo', 'próximo').replace('siguiente', 'próximo')
-        # Aceptar 30/09, 30-09, 30.09, 30 09
+
+        # --- Normalización de formatos explícitos DD/MM ---
+        texto_norm = texto_lower.replace('proximo', 'próximo').replace('siguiente', 'próximo')
         m_dm = re.search(r"\b(\d{1,2})[\./\-\s](\d{1,2})(?:[\./\-\s](\d{2,4}))?\b", texto_norm)
         if m_dm:
-            dia = int(m_dm.group(1)); mes = int(m_dm.group(2)); anio = datetime.now().year
+            dia = int(m_dm.group(1))
+            mes = int(m_dm.group(2))
+            anio = datetime.now().year
             if m_dm.group(3):
                 y = int(m_dm.group(3))
                 anio = y if y > 99 else (2000 + y)
             try:
                 fecha_candidata = datetime(anio, mes, dia)
-                # Si fecha ya pasó este año y no especificaron año, mover al año siguiente
                 if not m_dm.group(3) and fecha_candidata.date() < datetime.now().date():
                     fecha_candidata = fecha_candidata.replace(year=anio + 1)
-                fecha_especifica = fecha_candidata.strftime('%Y-%m-%d')
-                logger.info(f"[UTILS] Fecha dd/mm normalizada: {fecha_especifica}")
+                fecha_especifica_iso = fecha_candidata.strftime('%Y-%m-%d')
+                logger.info(f"[UTILS] Fecha dd/mm normalizada: {fecha_especifica_iso}")
             except Exception:
                 pass
 
-        # NUEVA MEJORA: Extraer días de la semana específicos
+        # --- Días de la semana ---
         dias_semana = {
             'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2,
             'jueves': 3, 'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6
         }
-        
-        for dia, num_dia in dias_semana.items():
-            if dia in texto_lower:
-                # Calcular próxima fecha del día especificado
-                fecha_especifica = get_next_weekday_date(dia)
-                logger.info(f"[UTILS] Día de semana extraído: {dia} -> {fecha_especifica}")
+
+        for dia_nombre in dias_semana.keys():
+            if dia_nombre in texto_lower:
+                dia_semana_detectado = 'miércoles' if dia_nombre == 'miercoles' else dia_nombre
+                fecha_especifica_iso = get_next_weekday_date(dia_semana_detectado)
+                logger.info(f"[UTILS] Día de semana extraído: {dia_semana_detectado} -> {fecha_especifica_iso}")
                 break
-        
-        # Configurar dateparser para español con mejoras
+
+        # --- dateparser: fallback/general ---
         settings = {
-            'PREFER_DAY_OF_MONTH': 'first', 
+            'PREFER_DAY_OF_MONTH': 'first',
             'PREFER_DATES_FROM': 'future',
             'RELATIVE_BASE': datetime.now()
         }
         if preferencia_tz:
             settings['TIMEZONE'] = preferencia_tz
-        
+
         parsed_date = dateparser.parse(texto, settings=settings)
-        
-        # MEJORA CRÍTICA: Combinar fecha y hora extraídas
-        if parsed_date:
-            if hora_especifica:
-                parsed_date = parsed_date.replace(hour=hora_especifica.hour, minute=hora_especifica.minute)
-                logger.info(f"[UTILS] Fecha y hora combinadas: {parsed_date}")
-            
-            # Si se extrajo fecha específica de día de semana, usarla
-            if fecha_especifica:
-                try:
-                    fecha_obj = datetime.strptime(fecha_especifica, '%Y-%m-%d')
-                    parsed_date = parsed_date.replace(year=fecha_obj.year, month=fecha_obj.month, day=fecha_obj.day)
-                    logger.info(f"[UTILS] Fecha específica aplicada: {parsed_date}")
-                except Exception as e:
-                    logger.warning(f"[UTILS] Error al aplicar fecha específica: {e}")
-        
-        # Devolver tupla (fecha_deseada, hora_especifica) para alinear con consumidores
-        if not parsed_date and not hora_especifica and not fecha_especifica and not restricciones:
-            return None
-        fecha_deseada = None
-        if parsed_date:
-            fecha_deseada = parsed_date
-        elif fecha_especifica:
+
+        if parsed_date and hora_datetime:
+            parsed_date = parsed_date.replace(hour=hora_datetime.hour, minute=hora_datetime.minute)
+            logger.info(f"[UTILS] Fecha y hora combinadas: {parsed_date}")
+
+        if fecha_especifica_iso and parsed_date:
             try:
-                fecha_deseada = datetime.strptime(fecha_especifica, '%Y-%m-%d')
+                fecha_obj = datetime.strptime(fecha_especifica_iso, '%Y-%m-%d')
+                parsed_date = parsed_date.replace(year=fecha_obj.year, month=fecha_obj.month, day=fecha_obj.day)
+                logger.info(f"[UTILS] Fecha específica aplicada: {parsed_date}")
+            except Exception as e:
+                logger.warning(f"[UTILS] Error al aplicar fecha específica: {e}")
+
+        if parsed_date:
+            fecha_datetime = parsed_date
+            fecha_especifica_iso = fecha_especifica_iso or parsed_date.strftime('%Y-%m-%d')
+        elif fecha_especifica_iso:
+            try:
+                fecha_datetime = datetime.strptime(fecha_especifica_iso, '%Y-%m-%d')
             except Exception:
-                fecha_deseada = None
-        # Construir resultado como (fecha, hora, preferencias)
-        resultado = (fecha_deseada, hora_especifica.strftime('%H:%M') if hora_especifica else None)
-        return resultado
+                fecha_datetime = None
+
+        resultado_detallado = None
+        if fecha_datetime or hora_str or restricciones or preferencia_detectada:
+            resultado_detallado = {
+                'fecha_datetime': fecha_datetime,
+                'fecha_iso': fecha_especifica_iso,
+                'hora': hora_str,
+                'preferencia_horaria': preferencia_detectada,
+                'restricciones_temporales': restricciones if restricciones else None,
+                'dia_semana': dia_semana_detectado,
+                'expresion_original': texto.strip()
+            }
+
+        if return_details:
+            return resultado_detallado or {}
+
+        if resultado_detallado:
+            return (resultado_detallado['fecha_datetime'], resultado_detallado['hora'])
+
+        return None
+
     except Exception as e:
         logger.error(f"Error al parsear fecha/hora natural: {e}")
-        return None
+        return {} if return_details else None
 
 def get_current_datetime():
     """Retorna la fecha y hora actual en formato ISO"""
@@ -1020,6 +1038,13 @@ def get_available_slots_catalog(author, fecha_deseada=None, max_slots=5, hora_es
         if not available_slots:
             logger.warning(f"[CATALOGO] No se encontraron turnos disponibles para {author}")
             return []
+
+        if hora_especifica or preferencia_horaria:
+            available_slots = agendamiento_handler._filtrar_slots_por_restricciones(
+                available_slots,
+                [],
+                preferencia_horaria
+            )
         
         # Validar que available_slots sea una lista
         if not isinstance(available_slots, list):

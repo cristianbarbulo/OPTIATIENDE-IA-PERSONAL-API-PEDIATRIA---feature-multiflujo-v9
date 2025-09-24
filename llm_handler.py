@@ -365,31 +365,46 @@ def _extraer_datos_agendamiento(texto_usuario: str) -> dict:
     texto = texto_usuario.lower().strip()
     
     try:
-        # Extraer fecha específica usando utils
         from utils import parsear_fecha_hora_natural
-        resultado_parsing = parsear_fecha_hora_natural(texto_usuario)
-        
-        # CORRECCIÓN V10: Manejar caso cuando parsear_fecha_hora_natural devuelve None
-        if resultado_parsing and isinstance(resultado_parsing, (tuple, list)) and len(resultado_parsing) >= 2:
-            fecha_parseada, hora_parseada = resultado_parsing[0], resultado_parsing[1]
-            
-            if fecha_parseada:
-                datos['fecha_deseada'] = fecha_parseada
-                logger.info(f"[EXTRACCION] Fecha detectada: {fecha_parseada}")
-            
+        resultado_parsing = parsear_fecha_hora_natural(texto_usuario, return_details=True)
+
+        if resultado_parsing:
+            fecha_dt = resultado_parsing.get('fecha_datetime')
+            fecha_iso = resultado_parsing.get('fecha_iso')
+            hora_parseada = resultado_parsing.get('hora')
+            preferencia_horaria = resultado_parsing.get('preferencia_horaria')
+            restricciones = resultado_parsing.get('restricciones_temporales') or []
+            dia_semana = resultado_parsing.get('dia_semana')
+
+            if fecha_dt:
+                datos['fecha_deseada'] = fecha_dt.strftime('%Y-%m-%d')
+                logger.info(f"[EXTRACCION] Fecha detectada: {datos['fecha_deseada']}")
+            elif fecha_iso:
+                datos['fecha_deseada'] = fecha_iso
+                logger.info(f"[EXTRACCION] Fecha detectada (ISO): {fecha_iso}")
+
             if hora_parseada:
                 datos['hora_especifica'] = hora_parseada
                 logger.info(f"[EXTRACCION] Hora detectada: {hora_parseada}")
+
+            if preferencia_horaria:
+                datos['preferencia_horaria'] = preferencia_horaria
+                logger.info(f"[EXTRACCION] Preferencia horaria detectada: {preferencia_horaria}")
+
+            if restricciones:
+                datos['restricciones_temporales'] = restricciones
+                logger.info(f"[EXTRACCION] Restricciones temporales detectadas: {restricciones}")
+
+            if dia_semana:
+                datos['dia_semana'] = dia_semana
         else:
-            logger.warning(f"[EXTRACCION] parsear_fecha_hora_natural devolvió: {resultado_parsing}")
-        
-        # Extraer preferencia horaria
-        if any(p in texto for p in ["mañana", "temprano", "morning"]):
-            datos['preferencia_horaria'] = "mañana"
-        elif any(p in texto for p in ["tarde", "afternoon"]):
-            datos['preferencia_horaria'] = "tarde"
-        elif any(p in texto for p in ["noche", "evening", "night"]):
-            datos['preferencia_horaria'] = "noche"
+            logger.warning(f"[EXTRACCION] parsear_fecha_hora_natural no encontró datos en: '{texto_usuario}'")
+
+        # Extraer preferencias de días específicos
+        if any(p in texto for p in ["fin de semana", "weekend"]):
+            datos['preferencia_dia'] = "fin_de_semana"
+        elif any(p in texto for p in ["entre semana", "weekday"]):
+            datos['preferencia_dia'] = "entre_semana"
         
         # Extraer restricciones temporales
         restricciones = []
