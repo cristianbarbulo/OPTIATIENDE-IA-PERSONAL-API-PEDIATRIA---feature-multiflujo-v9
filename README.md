@@ -1727,14 +1727,15 @@ La migración a GPT-5 representa una evolución significativa del sistema OPTIAT
 
 #### Comandos Únicos Implementados
 
-El sistema ahora funciona **EXCLUSIVAMENTE** con 4 comandos explícitos:
+El sistema ahora funciona **EXCLUSIVAMENTE** con comandos explícitos:
 
 | **Comando** | **Función** | **Ubicación en Código** |
 |------------|------------|-------------------------|
-| `"QUIERO AGENDAR"` | Entrar a agendamiento | Meta-Agente líneas 402-410 |
-| `"QUIERO PAGAR"` | Entrar a pagos | Meta-Agente líneas 412-420 |
-| `"SALIR DE AGENDA"` | Salir de agendamiento | Meta-Agente líneas 392-399 |
-| `"SALIR DE PAGO"` | Salir de pagos | Meta-Agente líneas 383-390 |
+| `"QUIERO AGENDAR"` | Entrar a agendamiento | `llm_handler.py` (Meta-Agente) |
+| `"QUIERO PAGAR"` | Entrar a pagos | `llm_handler.py` (Meta-Agente) |
+| `"QUIERO REPROGRAMAR"` | Entrar a reprogramación (solo si existe una cita confirmada) | `llm_handler.py` (Meta-Agente) + guard en `main._ejecutar_accion` |
+| `"SALIR DE AGENDA"` | Salir de agendamiento | `llm_handler.py` (Meta-Agente) |
+| `"SALIR DE PAGO"` | Salir de pagos | `llm_handler.py` (Meta-Agente) |
 
 #### Flujo Educativo Integrado
 
@@ -1773,6 +1774,16 @@ if any(cmd in texto_lower for cmd in ["quiero agendar", "quiero agenda", "necesi
         "decision": "AGENDAMIENTO",
         "datos_extraidos": datos_extraidos,
         "accion_recomendada": "iniciar_triage_agendamiento"
+    }
+
+# Reprogramación (frase exacta, única vía)
+if "quiero reprogramar" in texto_lower:
+    logger.info("[META_AGENTE] ✅ Comando QUIERO REPROGRAMAR detectado")
+    return {
+        "decision": "REPROGRAMACION",
+        "dominio": "AGENDAMIENTO",
+        "datos_extraidos": _extraer_datos_agendamiento(texto_usuario),
+        "accion_recomendada": "iniciar_reprogramacion_cita"
     }
 ```
 
