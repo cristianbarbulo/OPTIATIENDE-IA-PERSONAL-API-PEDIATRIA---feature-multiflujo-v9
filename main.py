@@ -712,18 +712,26 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
     # MANEJO DE DECISIONES DEL META-AGENTE
     decision = meta_resultado.get("decision", "AGENTE_CERO")
     
-    # Comando SALIR - limpiar estado y pasar al Agente Cero
+    # Comando SALIR - limpiar estado y pasar al Agente Cero (con reglas estrictas)
     if decision in ["SALIR_PAGOS", "SALIR_AGENDAMIENTO"]:
         logger.info(f"[ESTRATEGIA] Comando SALIR detectado: {decision}")
-        # Limpiar estado completamente
-        # Reset mínimo e inteligente: no exponer a estados fantasma
+        # Reglas específicas de salida
+        if decision == "SALIR_PAGOS":
+            pago_verificado = bool((state_context or {}).get('payment_verified'))
+            if not pago_verificado:
+                logger.info("[ESTRATEGIA] Comando SALIR DE PAGO rechazado: pago no verificado")
+                # Mantenerse en pagos: forzar 'preguntar' y no cambiar dominio
+                return {
+                    "accion_recomendada": "preguntar",
+                    "detalles": {"dominio_sugerido": "PAGOS", "motivo": "salida_rechazada_pago_no_verificado"}
+                }
+        # Limpiar estado completamente y volver al Agente Cero
         state_context = {
             'author': state_context.get('author'),
             'senderName': state_context.get('senderName'),
             'pasado_a_departamento': False,
             'triage_count': 0
         }
-        # Retornar acción que lleve al Agente Cero
         estrategia = {
             "accion_recomendada": "volver_agente_cero",
             "detalles": {
@@ -1052,6 +1060,14 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # BLINDAJE V10: En pagos, NUNCA usar Agente Cero, SIEMPRE mostrar servicios
         logger.info(f"[BLINDAJE_PAGOS] Forzando servicios de pago - NO texto conversacional")
         try:
+            # Si el pago ya está verificado, no hay nada más que hacer en pagos.
+            # Educar al usuario para salir explícitamente del flujo.
+            if state_context.get('payment_verified'):
+                return (
+                    "Tu pago ya está verificado. Para salir del flujo de pagos y continuar, escribí: SALIR DE PAGO.\n\n"
+                    "Luego, para entrar a agendamiento, escribí: QUIERO AGENDAR.",
+                    state_context
+                )
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
             if current_state_sc == 'PAGOS_ESPERANDO_CONFIRMACION':
                 return pago_handler.reanudar_flujo_anterior(history, detalles or {}, state_context, mensaje_completo_usuario)
@@ -1557,12 +1573,21 @@ def wrapper_usar_agente_cero(history, detalles, state_context, mensaje_completo_
         import utils
         data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_usar_agente_cero") or {}
         
-        # 1) Si el Agente Cero recomienda una acción válida, EJECUTARLA (no enviar JSON crudo)
+        # 1) Si el Agente Cero recomienda una acción válida, NO ejecutar directamente: derivar a Meta-Agente
         accion_recomendada = str(data_cero.get("accion_recomendada", "")).strip()
         if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
-            logger.info(f"[USAR_AGENTE_CERO] Agente Cero recomienda acción: {accion_recomendada}")
+            logger.info(f"[USAR_AGENTE_CERO] Agente Cero recomienda acción: {accion_recomendada} → Derivando a Meta-Agente")
             detalles_accion = data_cero.get("detalles", {}) or {}
-            return _ejecutar_accion(accion_recomendada, history, detalles_accion, state_context, mensaje_completo_usuario, author)
+            sc = state_context or {}
+            sc['pasado_a_departamento'] = True
+            if 'author' not in sc and author:
+                sc['author'] = author
+            estado_actual = sc.get('current_state') or 'conversando'
+            mensaje_enriquecido = f"Contexto: {estado_actual}. Usuario: '{mensaje_completo_usuario}'"
+            estrategia_local = _obtener_estrategia(estado_actual, mensaje_enriquecido, history, detalles_accion, mensaje_completo_usuario, sc)
+            if estrategia_local and estrategia_local.get("accion_recomendada"):
+                return _ejecutar_accion(estrategia_local.get("accion_recomendada"), history, estrategia_local.get("detalles", {}), sc, mensaje_completo_usuario, author)
+            return "Para agendar, escribí: QUIERO AGENDAR. Para pagos, escribí: QUIERO PAGAR", sc
         
         # 2) Si viene JSON con response_text, usar solo ese texto
         if data_cero.get("response_text"):
@@ -3563,20 +3588,16 @@ def process_message_logic(author, messages_to_process):
                     # CASO 1: Agente Cero recomienda una acción específica
                     accion_recomendada = data_cero.get("accion_recomendada", "").strip()
                     if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
-                        # El Agente Cero recomienda una acción - ejecutarla
+                        # No ejecutar directamente: derivar al Meta-Agente para mantener regla perfecta
                         detalles_cero = data_cero.get("detalles", {})
-                        logger.info(f"[AGENTE_CERO] Acción recomendada: {accion_recomendada}")
-                        mensaje_enriquecido = f"Contexto: {current_state}. Usuario: '{mensaje_completo_usuario}'"
-                        estrategia = {
-                            "accion_recomendada": accion_recomendada,
-                            "detalles": detalles_cero
-                        }
-                        # Actualizar pasado_a_departamento para el Meta-Agente
+                        logger.info(f"[AGENTE_CERO] Acción recomendada: {accion_recomendada} → Derivando a Meta-Agente")
                         state_context['pasado_a_departamento'] = True
-                        # CRÍTICO: Asegurar que author se preserve
                         if 'author' not in state_context and author:
                             state_context['author'] = author
                         nuevo_contexto = state_context
+                        estado_actual = nuevo_contexto.get('current_state', current_state)
+                        mensaje_enriquecido = f"Contexto: {estado_actual}. Usuario: '{mensaje_completo_usuario}'"
+                        estrategia = _obtener_estrategia(estado_actual, mensaje_enriquecido, history, detalles_cero or {}, mensaje_completo_usuario, nuevo_contexto)
                     
                     # CASO 2: Agente Cero retorna decision="RESPUESTA_GENERAL" 
                     elif data_cero.get("decision") == "RESPUESTA_GENERAL":
@@ -3598,6 +3619,10 @@ def process_message_logic(author, messages_to_process):
                         nuevo_contexto = state_context
                         mensaje_enriquecido = f"Contexto: {current_state}. Usuario: '{mensaje_completo_usuario}'"
                         estrategia = _obtener_estrategia(current_state, mensaje_enriquecido, history, {}, mensaje_completo_usuario, nuevo_contexto)
+                        # BLINDAJE: En ausencia de comandos, el Agente Cero no puede cambiar de flujo
+                        if estrategia and estrategia.get("accion_recomendada") not in ["iniciar_triage_agendamiento", "iniciar_triage_pagos", "preguntar", "volver_agente_cero"]:
+                            estrategia["accion_recomendada"] = "preguntar"
+                            logger.info("[AGENTE_CERO] Blindaje aplicado: mantener flujo hasta comando explícito")
                         logger.info(f"[AGENTE_CERO] Pasando a departamento especializado")
                     
                     else:
@@ -3719,10 +3744,11 @@ def process_message_logic(author, messages_to_process):
             logger.info(f"[EJECUTAR] Ejecutando acción '{accion}' para {author}")
             respuesta_final, nuevo_contexto = _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_usuario, author)
             
-            # CORRECCIÓN CRÍTICA: Guardar contexto inmediatamente después de ejecutar la acción
-            if nuevo_contexto and nuevo_contexto != state_context:
-                logger.info(f"[CONTEXTO] Guardando contexto actualizado inmediatamente para {author}")
-                memory.update_conversation_state(author, current_state, context=_clean_context_for_firestore(nuevo_contexto))
+        # CORRECCIÓN CRÍTICA: Guardar contexto inmediatamente después de ejecutar la acción
+        if nuevo_contexto and nuevo_contexto != state_context:
+            logger.info(f"[CONTEXTO] Guardando contexto actualizado inmediatamente para {author}")
+            estado_a_persistir_post = (nuevo_contexto or {}).get('current_state', current_state)
+            memory.update_conversation_state(author, estado_a_persistir_post, context=_clean_context_for_firestore(nuevo_contexto))
         elif not respuesta_final:
             logger.warning(f"[ORQUESTADOR] No se pudo determinar una acción para '{mensaje_completo_usuario}'")
             
@@ -3747,7 +3773,10 @@ def process_message_logic(author, messages_to_process):
                 if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('PAGOS_'):
                     # Solo permitimos salir a 'conversando' con comando explícito
                     if proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
-                        pass
+                        # Reglas adicionales: permitir solo si hay pago verificado
+                        if not ((nuevo_contexto or {}).get('payment_verified')):
+                            logger.info("[BLINDAJE_ESTADO] Cambio a 'conversando' rechazado: pago no verificado")
+                            proximo_estado_sugerido = None
                     else:
                         logger.info(f"[BLINDAJE_ESTADO] Ignorando cambio de estado fuera de PAGOS desde '{current_state_local}' a '{proximo_estado_sugerido}' sin 'SALIR DE PAGO'")
                         proximo_estado_sugerido = None

@@ -518,7 +518,7 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
         }
     
     # Comandos ENTRADA EXPLÍCITA
-    # V10: entrada EXPLÍCITA estricta (no interpretar variaciones)
+    # V10: entrada EXPLÍCITA estricta (solo frases exactas)
     if any(cmd in texto_lower for cmd in ["quiero agendar"]):
         logger.info("[META_AGENTE] ✅ Comando QUIERO AGENDAR detectado")
         datos_extraidos = _extraer_datos_agendamiento(texto_usuario)
@@ -529,7 +529,7 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
             "accion_recomendada": "iniciar_triage_agendamiento"
         }
     
-    # V10: entrada EXPLÍCITA estricta (no interpretar variaciones)
+    # V10: entrada EXPLÍCITA estricta (solo frases exactas)
     if any(cmd in texto_lower for cmd in ["quiero pagar"]):
         logger.info("[META_AGENTE] ✅ Comando QUIERO PAGAR detectado")
         datos_extraidos = _extraer_datos_pagos(texto_usuario)
