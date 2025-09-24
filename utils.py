@@ -600,6 +600,27 @@ def parsear_fecha_hora_natural(texto, preferencia_tz=None):
                 restricciones.append(f"antes_{hora_limite}")
                 logger.info(f"[UTILS] Restricción temporal extraída: antes de las {hora_limite}")
         
+        # NUEVA MEJORA: Normalizar expresiones de fecha comunes (dd/mm, dd-mm, dd.mm)
+        # y detectar "próximo"/"siguiente" como sesgo al futuro
+        texto_norm = texto_lower
+        texto_norm = texto_norm.replace('proximo', 'próximo').replace('siguiente', 'próximo')
+        # Aceptar 30/09, 30-09, 30.09, 30 09
+        m_dm = re.search(r"\b(\d{1,2})[\./\-\s](\d{1,2})(?:[\./\-\s](\d{2,4}))?\b", texto_norm)
+        if m_dm:
+            dia = int(m_dm.group(1)); mes = int(m_dm.group(2)); anio = datetime.now().year
+            if m_dm.group(3):
+                y = int(m_dm.group(3))
+                anio = y if y > 99 else (2000 + y)
+            try:
+                fecha_candidata = datetime(anio, mes, dia)
+                # Si fecha ya pasó este año y no especificaron año, mover al año siguiente
+                if not m_dm.group(3) and fecha_candidata.date() < datetime.now().date():
+                    fecha_candidata = fecha_candidata.replace(year=anio + 1)
+                fecha_especifica = fecha_candidata.strftime('%Y-%m-%d')
+                logger.info(f"[UTILS] Fecha dd/mm normalizada: {fecha_especifica}")
+            except Exception:
+                pass
+
         # NUEVA MEJORA: Extraer días de la semana específicos
         dias_semana = {
             'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2,
@@ -639,7 +660,20 @@ def parsear_fecha_hora_natural(texto, preferencia_tz=None):
                 except Exception as e:
                     logger.warning(f"[UTILS] Error al aplicar fecha específica: {e}")
         
-        return parsed_date
+        # Devolver tupla (fecha_deseada, hora_especifica) para alinear con consumidores
+        if not parsed_date and not hora_especifica and not fecha_especifica and not restricciones:
+            return None
+        fecha_deseada = None
+        if parsed_date:
+            fecha_deseada = parsed_date
+        elif fecha_especifica:
+            try:
+                fecha_deseada = datetime.strptime(fecha_especifica, '%Y-%m-%d')
+            except Exception:
+                fecha_deseada = None
+        # Construir resultado como (fecha, hora, preferencias)
+        resultado = (fecha_deseada, hora_especifica.strftime('%H:%M') if hora_especifica else None)
+        return resultado
     except Exception as e:
         logger.error(f"Error al parsear fecha/hora natural: {e}")
         return None

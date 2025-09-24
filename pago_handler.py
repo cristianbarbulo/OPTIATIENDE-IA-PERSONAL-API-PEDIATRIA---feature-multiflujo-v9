@@ -469,7 +469,11 @@ def confirmar_pago(history, context, state_context, mensaje_completo_usuario, au
         # Marcar pago registrado sin validaciones
         ctx['pago_registrado'] = True
         ctx['comprobante_enviado'] = True
-        ctx['current_state'] = 'conversando'
+        # BLINDAJE: no salir automáticamente del flujo de pagos
+        # Mantener estado actual o fijar a 'PAGOS_ESPERANDO_CONFIRMACION' si no está definido
+        current_state = (ctx.get('current_state') or '').strip()
+        if not current_state:
+            ctx['current_state'] = 'PAGOS_ESPERANDO_CONFIRMACION'
         
         # NUEVO: Marcar verificación de pago si se detectó monto
         if monto_detectado:
@@ -489,11 +493,11 @@ def confirmar_pago(history, context, state_context, mensaje_completo_usuario, au
                     ctx['requires_payment_first'] = False
                     ctx['blocked_action'] = None
                     
-                    # Actualizar estado para salir del flujo de pagos
-                    current_state = ctx.get('current_state', '')
-                    if current_state.startswith('PAGOS_'):
-                        ctx['current_state'] = 'conversando'
-                        logger.info(f"[CONFIRMAR_PAGO] 🔄 Estado actualizado de '{current_state}' a 'conversando'")
+                    # BLINDAJE: Mantenerse en flujo de pagos hasta SALIR DE PAGO explícito
+                    current_state = (ctx.get('current_state') or '').strip()
+                    if current_state.startswith('PAGOS_') or not current_state or current_state == 'conversando':
+                        ctx['current_state'] = 'PAGOS_ESPERANDO_CONFIRMACION'
+                        logger.info(f"[CONFIRMAR_PAGO] 🔒 Permaneciendo en flujo de pagos: '{ctx['current_state']}'")
                     
                     logger.info(f"[CONFIRMAR_PAGO] ✅ Pago verificado automáticamente por ${monto_numerico}")
                     

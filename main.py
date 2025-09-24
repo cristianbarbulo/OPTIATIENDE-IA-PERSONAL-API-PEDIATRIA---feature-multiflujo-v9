@@ -716,6 +716,7 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
     if decision in ["SALIR_PAGOS", "SALIR_AGENDAMIENTO"]:
         logger.info(f"[ESTRATEGIA] Comando SALIR detectado: {decision}")
         # Limpiar estado completamente
+        # Reset mínimo e inteligente: no exponer a estados fantasma
         state_context = {
             'author': state_context.get('author'),
             'senderName': state_context.get('senderName'),
@@ -736,7 +737,6 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             "accion_recomendada": "usar_agente_cero", 
             "detalles": {}
         }
-    # CORRECCIÓN DEFINITIVA - Reescribir línea problemática
     else:
         # Flujo normal - comandos explícitos o en flujo activo
         dominio = meta_resultado.get("dominio", "AGENDAMIENTO")
@@ -749,8 +749,16 @@ def _obtener_estrategia(current_state, mensaje_enriquecido, history, contexto_ex
             "detalles": datos_extraidos.copy()
         }
         
-        # Agregar información de dominio
+        # Agregar información de dominio y aplicar blindaje de flujo activo
         estrategia["detalles"]["dominio_sugerido"] = dominio
+        # BLINDAJE CENTRAL DE ESTADO: si hay flujo activo, jamás cambiar dominio
+        if current_state and (current_state.startswith('PAGOS_') or current_state.startswith('AGENDA_')):
+            estrategia["accion_recomendada"] = "preguntar"
+            datos_extraidos.clear()  # ignorar extracción que cambie de dominio
+            logger.info(f"[ESTRATEGIA] 🔒 Flujo activo -> forzar 'preguntar' y mantener dominio")
+        if current_state and (current_state.startswith('PAGOS_') or current_state.startswith('AGENDA_')):
+            estrategia["accion_recomendada"] = "preguntar"
+            logger.info(f"[ESTRATEGIA] 🔒 Flujo activo detectado. Forzando 'preguntar' (sin cambio de dominio)")
         
         logger.info(f"[ESTRATEGIA] Estrategia construida desde Meta-Agente: {estrategia}")
 
@@ -903,6 +911,8 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
     logger.info(f"[WRAPPER_PREGUNTAR] hay_pagos_activo: {hay_pagos_activo}, hay_agenda_activa: {hay_agenda_activa}")
     
     # Si current_state = "conversando" → NO hay flujos activos, usar Agente Cero
+    # BLINDAJE: si hay 'pasado_a_departamento' True se respeta como metadato, pero
+    # no se considera flujo activo salvo que el estado comience con PAGOS_/AGENDA_
     if current_state_sc == 'conversando':
         logger.info(f"[WRAPPER_PREGUNTAR] Estado 'conversando' - Usando Agente Cero directamente")
         author = state_context.get('author') if state_context else None
@@ -910,11 +920,18 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         
         respuesta_cero = _llamar_agente_cero_directo(history, context_info)
         
-        # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+        # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para ejecutar acción o extraer solo texto
         try:
             import utils
             data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_conversando") or {}
             
+            # CASO 0: Ejecutar acción si es válida
+            accion_recomendada = str(data_cero.get("accion_recomendada", "")).strip()
+            if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
+                logger.info(f"[WRAPPER_PREGUNTAR] (conversando) Agente Cero recomienda acción: {accion_recomendada}")
+                detalles_accion = data_cero.get("detalles", {}) or {}
+                return _ejecutar_accion(accion_recomendada, history, detalles_accion, state_context, mensaje_completo_usuario, author)
+
             # Si viene JSON con response_text, usar solo ese texto
             if data_cero.get("response_text"):
                 respuesta_final = data_cero.get("response_text")
@@ -997,17 +1014,35 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
         # BLINDAJE V10: En agenda, NUNCA usar Agente Cero, SIEMPRE botones
         # Si hay nueva fecha en detalles, ejecutar nuevo triage
         detalles_actuales = detalles or {}
-        fecha_nueva = detalles_actuales.get('fecha_deseada')
+        # Tomar fecha/hora detectadas por el Meta-Agente si existen
+        fecha_nueva = detalles_actuales.get('fecha_deseada') or state_context.get('fecha_deseada')
+        hora_especifica = detalles_actuales.get('hora_especifica') or state_context.get('hora_especifica')
+        preferencia_horaria = detalles_actuales.get('preferencia_horaria') or state_context.get('preferencia_horaria')
         fecha_actual_contexto = state_context.get('fecha_deseada')
         
         if fecha_nueva and fecha_nueva != fecha_actual_contexto:
             logger.info(f"[BLINDAJE_AGENDA] Nueva fecha detectada: {fecha_nueva} - Ejecutando nuevo triage")
+            # Pasar también hora/preferencia si están disponibles
+            if hora_especifica:
+                detalles_actuales['hora_especifica'] = hora_especifica
+            if preferencia_horaria:
+                detalles_actuales['preferencia_horaria'] = preferencia_horaria
             return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
         else:
             # SIEMPRE mostrar turnos con botones - NO texto conversacional
             logger.info(f"[BLINDAJE_AGENDA] Forzando botones de turnos - NO texto conversacional")
             try:
-                resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+                # Forzar el filtrado por fecha/hora/preferencia si existen
+                if fecha_nueva:
+                    detalles_actuales['fecha_deseada'] = fecha_nueva
+                if hora_especifica:
+                    detalles_actuales['hora_especifica'] = hora_especifica
+                if preferencia_horaria:
+                    detalles_actuales['preferencia_horaria'] = preferencia_horaria
+
+                resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(
+                    history, detalles_actuales, state_context, mensaje_completo_usuario, author
+                )
                 
                 # Si mostrar_opciones_turnos devuelve None (éxito), mensaje interactivo enviado
                 if resultado is None:
@@ -1464,12 +1499,19 @@ def wrapper_usar_agente_cero(history, detalles, state_context, mensaje_completo_
     # Llamar Agente Cero con contexto completo
     respuesta_cero = _llamar_agente_cero_directo(history, context_info)
     
-    # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
+    # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer acción o solo texto
     try:
         import utils
         data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_usar_agente_cero") or {}
         
-        # Si viene JSON con response_text, usar solo ese texto
+        # 1) Si el Agente Cero recomienda una acción válida, EJECUTARLA (no enviar JSON crudo)
+        accion_recomendada = str(data_cero.get("accion_recomendada", "")).strip()
+        if accion_recomendada and accion_recomendada in MAPA_DE_ACCIONES:
+            logger.info(f"[USAR_AGENTE_CERO] Agente Cero recomienda acción: {accion_recomendada}")
+            detalles_accion = data_cero.get("detalles", {}) or {}
+            return _ejecutar_accion(accion_recomendada, history, detalles_accion, state_context, mensaje_completo_usuario, author)
+        
+        # 2) Si viene JSON con response_text, usar solo ese texto
         if data_cero.get("response_text"):
             respuesta_final = data_cero.get("response_text")
             logger.info(f"[USAR_AGENTE_CERO] Texto extraído del JSON: {respuesta_final[:100]}...")
