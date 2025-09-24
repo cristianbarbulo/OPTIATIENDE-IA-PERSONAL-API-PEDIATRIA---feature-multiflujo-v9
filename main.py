@@ -974,93 +974,51 @@ def wrapper_preguntar(history, detalles, state_context, mensaje_completo_usuario
             # Ante cualquier fallo, silencio elegante
             return "", sc
 
-    # 1) PAGOS: reanudar flujo o volver a listar servicios, sin generador (prioritario)
+    # 1) PAGOS: BLINDAJE TOTAL - SOLO SERVICIOS/BOTONES, NUNCA TEXTO CONVERSACIONAL
     if hay_pagos_activo and 'pago_handler' in globals():
-        # Si es un agradecimiento/ack breve, responder con cortesía (o silencio) y NO re-listar
-        if _es_ack_breve(mensaje_completo_usuario):
-            return _responder_ack_cortesia(detalles or {}, state_context)
-        # Si es una pregunta general, responder con Agente Cero y mantener el flujo de pagos
-        if _es_pregunta_general(mensaje_completo_usuario):
-            # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo garantizado
-            author = state_context.get('author') if state_context else None
-            context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
-            
-            # REEMPLAZO QUIRÚRGICO: Usar Agente Cero en lugar del generador
-            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
-            
-            # CORRECCIÓN CRÍTICA: Procesar respuesta del Agente Cero para extraer solo texto
-            try:
-                import utils
-                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_pagos") or {}
-                
-                # Si viene JSON con response_text, usar solo ese texto
-                if data_cero.get("response_text"):
-                    respuesta_final = data_cero.get("response_text")
-                else:
-                    respuesta_final = respuesta_cero
-            except Exception:
-                respuesta_final = respuesta_cero
-            
-            return respuesta_final, state_context
+        logger.info(f"[WRAPPER_PREGUNTAR] BLINDAJE PAGOS - Solo servicios/botones permitidos")
+        
+        # BLINDAJE V10: En pagos, NUNCA usar Agente Cero, SIEMPRE mostrar servicios
+        logger.info(f"[BLINDAJE_PAGOS] Forzando servicios de pago - NO texto conversacional")
         try:
             # Si ya estábamos esperando confirmación, reanudar; de lo contrario, volver a listar
             if current_state_sc == 'PAGOS_ESPERANDO_CONFIRMACION':
                 return pago_handler.reanudar_flujo_anterior(history, detalles or {}, state_context, mensaje_completo_usuario)
             return pago_handler.mostrar_servicios_pago(history, detalles or {}, state_context, mensaje_completo_usuario, author)
-        except Exception:
-            # Si algo falla, continuar hacia generador como último recurso
-            pass
+        except Exception as e:
+            logger.error(f"[BLINDAJE_PAGOS] Error crítico: {e}")
+            return "Para continuar en pagos, elegí un servicio de la lista anterior. Para salir, escribí: SALIR DE PAGO", state_context
 
-    # 2) AGENDA: flujo activo de agendamiento
+    # 2) AGENDA: BLINDAJE TOTAL - SOLO BOTONES, NUNCA TEXTO CONVERSACIONAL
     if hay_agenda_activa and 'agendamiento_handler' in globals():
-        logger.info(f"[WRAPPER_PREGUNTAR] Flujo AGENDA activo - Procesando en contexto de agendamiento")
+        logger.info(f"[WRAPPER_PREGUNTAR] BLINDAJE AGENDA - Solo botones permitidos")
         
-        # Si es pregunta general, usar Agente Cero con contexto de agenda
-        if _es_pregunta_general(mensaje_completo_usuario):
-            author = state_context.get('author') if state_context else None
-            context_info = _construir_context_info_completo(detalles, state_context, mensaje_completo_usuario, "preguntar", author)
-            
-            respuesta_cero = _llamar_agente_cero_directo(history, context_info)
-            
+        # BLINDAJE V10: En agenda, NUNCA usar Agente Cero, SIEMPRE botones
+        # Si hay nueva fecha en detalles, ejecutar nuevo triage
+        detalles_actuales = detalles or {}
+        fecha_nueva = detalles_actuales.get('fecha_deseada')
+        fecha_actual_contexto = state_context.get('fecha_deseada')
+        
+        if fecha_nueva and fecha_nueva != fecha_actual_contexto:
+            logger.info(f"[BLINDAJE_AGENDA] Nueva fecha detectada: {fecha_nueva} - Ejecutando nuevo triage")
+            return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
+        else:
+            # SIEMPRE mostrar turnos con botones - NO texto conversacional
+            logger.info(f"[BLINDAJE_AGENDA] Forzando botones de turnos - NO texto conversacional")
             try:
-                import utils
-                data_cero = utils.parse_json_from_llm_robusto(str(respuesta_cero), context="wrapper_preguntar_agenda") or {}
-                if data_cero.get("response_text"):
-                    respuesta_final = data_cero.get("response_text")
-                else:
-                    respuesta_final = respuesta_cero
-            except Exception:
-                respuesta_final = respuesta_cero
-            
-            return respuesta_final, state_context
-        
-        # Si es cortesía breve, responder breve
-        if _es_ack_breve(mensaje_completo_usuario):
-            return _responder_ack_cortesia(detalles or {}, state_context)
-        
-        # Para todo lo demás en agenda, verificar si necesita nueva búsqueda o mostrar existentes
-        try:
-            # CORRECCIÓN V10: Si hay nueva fecha en detalles, ejecutar nuevo triage en lugar de mostrar turnos existentes
-            detalles_actuales = detalles or {}
-            fecha_nueva = detalles_actuales.get('fecha_deseada')
-            fecha_actual_contexto = state_context.get('fecha_deseada')
-            
-            if fecha_nueva and fecha_nueva != fecha_actual_contexto:
-                logger.info(f"[WRAPPER_PREGUNTAR] Nueva fecha detectada: {fecha_nueva} (anterior: {fecha_actual_contexto}) - Ejecutando nuevo triage")
-                return agendamiento_handler.iniciar_triage_agendamiento(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
-            else:
-                # Mostrar turnos existentes
                 resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(history, detalles_actuales, state_context, mensaje_completo_usuario, author)
                 
-                # CORRECCIÓN V10: Si mostrar_opciones_turnos devuelve None (éxito), no continuar con fallback
+                # Si mostrar_opciones_turnos devuelve None (éxito), mensaje interactivo enviado
                 if resultado is None:
-                    logger.info(f"[WRAPPER_PREGUNTAR] Turnos mostrados exitosamente - No usar fallback Agente Cero")
-                    return None, nuevo_state  # Mensaje interactivo enviado exitosamente
+                    logger.info(f"[BLINDAJE_AGENDA] Botones enviados exitosamente")
+                    return None, nuevo_state
                 else:
-                    return resultado, nuevo_state
-        except Exception as e:
-            logger.error(f"[WRAPPER_PREGUNTAR] Error en agendamiento: {e}")
-            return "Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA", state_context
+                    # Si devuelve texto (fallback), convertir a botón educativo
+                    logger.warning(f"[BLINDAJE_AGENDA] Texto detectado - Convirtiendo a mensaje educativo")
+                    return "Para continuar en agendamiento, elegí un turno de la lista anterior. Para salir, escribí: SALIR DE AGENDA", nuevo_state
+            except Exception as e:
+                logger.error(f"[BLINDAJE_AGENDA] Error crítico: {e}")
+                return "Para salir del agendamiento, escribí: SALIR DE AGENDA", state_context
 
     # 3) Sin flujo activo o estado final: usar Agente Cero conversacional
     logger.info(f"[WRAPPER_PREGUNTAR] Sin flujo activo - Usando Agente Cero conversacional")
@@ -3268,99 +3226,23 @@ def _agente_cero_decision(mensaje_completo_usuario, history, state_context):
     palabras_agendar = ["quiero agendar", "agendar", "agenda", "turno", "cita", "fecha", "hora", "disponible"]
     palabras_pagar = ["quiero pagar", "pagar", "necesito pagar", "dame las opciones", "pago", "link de pago", "abonar", "precio", "costo", "servicio", "link", "plan", "mercado pago", "mercadopago"]
     
-    # DETECCIÓN INMEDIATA EN AGENTE CERO
-    for palabra in palabras_agendar + palabras_pagar:
-        if palabra in mensaje_lower:
-            # HARD-GUARD: No derivar si no hay departamentos habilitados
-            if not (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS)):
-                logger.info(f"[AGENTE_CERO] Detección '{palabra}' pero MODO SOLO AGENTE CERO. No se deriva.")
-                state_context['pasado_a_departamento'] = False
-                break
-            logger.info(f"[AGENTE_CERO] Detección directa por palabra clave: '{palabra}'. Pasando directo al departamento.")
-            state_context['pasado_a_departamento'] = True
-            return {
-                'decision': 'PASADO_A_DEPARTAMENTO',
-                'response_text': 'Perfecto, te conecto con nuestro sistema especializado para ayudarte mejor.',
-                'state_context_updated': state_context
-            }
+    # BLINDAJE V10: ELIMINAR DETECCIÓN AUTOMÁTICA - SOLO COMANDOS EXPLÍCITOS
+    # Ya no detectamos palabras sueltas como "turno", "pago" para derivar automáticamente
+    # El usuario DEBE usar comandos explícitos: "QUIERO AGENDAR" o "QUIERO PAGAR"
+    logger.info(f"[AGENTE_CERO] BLINDAJE V10 - Solo comandos explícitos permitidos, no detección automática")
     
-    # CORRECCIÓN CRÍTICA: Usar la función centralizada que ya maneja vendor hints y contexto
-    # NO duplicar lógica - usar _llamar_agente_cero_directo que ya lo hace todo
+    # Si no hay comando explícito, educar al usuario
+    state_context['pasado_a_departamento'] = False  # NO derivar automáticamente
     
-    try:
-        # CORRECCIÓN CRÍTICA: Usar función helper para context_info completo
-        author = state_context.get('author') if state_context else None
-        context_info = _construir_context_info_completo(None, state_context, mensaje_completo_usuario, "decidir_flujo", author)
-        
-        # CORRECCIÓN CRÍTICA: Usar la función centralizada con config.PROMPT_AGENTE_CERO
-        respuesta_raw = _llamar_agente_cero_directo(history, context_info)
-        
-        logger.info(f"[AGENTE_CERO] Respuesta raw del LLM: {respuesta_raw}")
-        
-        # Intentar parsear la respuesta JSON usando la función robusta
-        from utils import parse_json_from_llm_robusto
-        decision_data = parse_json_from_llm_robusto(respuesta_raw, "agente_cero")
-        
-        # Verificar si hubo error en el parsing
-        if "error" in decision_data:
-            logger.warning(f"[AGENTE_CERO] Error parseando JSON. Usando respuesta como RESPUESTA_GENERAL: {respuesta_raw}")
-            return {
-                'decision': 'RESPUESTA_GENERAL',
-                'response_text': respuesta_raw,
-                'state_context_updated': state_context
-            }
-        
-        decision = decision_data.get('decision')
-        response_text = decision_data.get('response_text', '')
-        
-        if decision not in ['RESPUESTA_GENERAL', 'PASADO_A_DEPARTAMENTO']:
-            logger.warning(f"[AGENTE_CERO] Decisión inválida: {decision}. Usando RESPUESTA_GENERAL por defecto.")
-            decision = 'RESPUESTA_GENERAL'
-            response_text = respuesta_raw  # Usar la respuesta raw como texto
-        
-        logger.info(f"[AGENTE_CERO] Decisión: {decision}")
-        
-        if decision == 'PASADO_A_DEPARTAMENTO':
-            # HARD-GUARD: No derivar si no hay departamentos habilitados
-            if not (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS)):
-                logger.info("[AGENTE_CERO] LLM sugirió derivar pero MODO SOLO AGENTE CERO. No se deriva.")
-                decision = 'RESPUESTA_GENERAL'
-            else:
-                # Marcar como pasado a departamento
-                state_context['pasado_a_departamento'] = True
-                logger.info(f"[AGENTE_CERO] Marcando pasado_a_departamento = True")
-                # Mensaje de transición
-                mensaje_transicion = "Perfecto, te conecto con nuestro sistema especializado para ayudarte mejor."
-                return {
-                    'decision': 'PASADO_A_DEPARTAMENTO',
-                    'response_text': mensaje_transicion,
-                    'state_context_updated': state_context
-                }
-        else:
-            # RESPUESTA_GENERAL
-            return {
-                'decision': 'RESPUESTA_GENERAL',
-                'response_text': response_text,
-                'state_context_updated': state_context
-            }
-            
-    except Exception as e:
-        logger.error(f"[AGENTE_CERO] Error en la evaluación: {e}", exc_info=True)
-        # En caso de error, en modo solo Agente Cero nunca derivar
-        if not (('PAYMENT' in config.ENABLED_AGENTS) or ('SCHEDULING' in config.ENABLED_AGENTS)):
-            state_context['pasado_a_departamento'] = False
-            return {
-                'decision': 'RESPUESTA_GENERAL',
-                'response_text': 'Estoy acá para ayudarte. ¿Podés contarme un poco más?',
-                'state_context_updated': state_context
-            }
-        # Si hay departamentos, derivar como antes
-        state_context['pasado_a_departamento'] = True
-        return {
-            'decision': 'PASADO_A_DEPARTAMENTO',
-            'response_text': 'Te conecto con nuestro sistema especializado para ayudarte mejor.',
-            'state_context_updated': state_context
-        }
+    # BLINDAJE V10: El Agente Cero educará sobre comandos explícitos
+    # NO hay derivación automática por palabras clave
+    logger.info(f"[AGENTE_CERO] Educando sobre comandos explícitos para: {mensaje_completo_usuario[:50]}...")
+    
+    return {
+        'decision': 'RESPUESTA_GENERAL',
+        'response_text': 'Para agendar turnos, escribí exactamente: QUIERO AGENDAR\nPara ver servicios de pago, escribí exactamente: QUIERO PAGAR\n\n¿En qué puedo ayudarte?',
+        'state_context_updated': state_context
+    }
 
 @app.route('/test-bot-locked-problem')
 def test_bot_locked_problem():
