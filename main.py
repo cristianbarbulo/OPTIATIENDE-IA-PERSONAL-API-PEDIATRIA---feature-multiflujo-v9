@@ -823,6 +823,59 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
         
         return mensaje_educativo, state_context
     
+    # BLINDAJE DE DOMINIO EN EJECUCIÓN: si hay flujo activo, bloquear acciones de otro dominio
+    try:
+        current_state_local = (state_context or {}).get('current_state', '') or ''
+        accion_limpia = str(accion).strip()
+        # Listas blancas mínimas por dominio
+        acciones_permitidas_pagos = {
+            'preguntar',
+            'iniciar_triage_pagos', 'mostrar_servicios_pago', 'generar_link_pago',
+            'confirmar_servicio_pago', 'confirmar_pago', 'reanudar_flujo_anterior',
+            'salir_de_pago'
+        }
+        acciones_permitidas_agenda = {
+            'preguntar',
+            'iniciar_agendamiento', 'iniciar_triage_agendamiento', 'mostrar_opciones_turnos',
+            'seleccionar_turno', 'confirmar_turno', 'reprogramar', 'cancelar',
+            'confirmar_cancelacion', 'reanudar_flujo_anterior', 'salir_de_agenda'
+        }
+        if current_state_local.startswith('PAGOS_'):
+            if accion_limpia not in acciones_permitidas_pagos:
+                logger.info("[BLINDAJE_EJECUTAR] En flujo PAGOS: bloqueo de acción fuera de dominio. Reforzando UI de pagos")
+                try:
+                    # Mostrar nuevamente servicios (sin texto conversacional)
+                    return pago_handler.mostrar_servicios_pago(
+                        history=history,
+                        detalles=detalles or {},
+                        state_context=state_context,
+                        mensaje_completo_usuario=mensaje_completo_usuario,
+                        author=author
+                    )
+                except Exception:
+                    return ("Estás en el flujo de pagos. Para continuar elegí un servicio. \n"
+                            "Para salir, escribí: SALIR DE PAGO"), state_context
+        elif current_state_local.startswith('AGENDA_'):
+            if accion_limpia not in acciones_permitidas_agenda:
+                logger.info("[BLINDAJE_EJECUTAR] En flujo AGENDA: bloqueo de acción fuera de dominio. Reforzando UI de agenda")
+                try:
+                    # Reforzar opciones de turnos (sin texto conversacional)
+                    resultado, nuevo_state = agendamiento_handler.mostrar_opciones_turnos(
+                        history=history,
+                        detalles=detalles or {},
+                        state_context=state_context,
+                        mensaje_completo_usuario=mensaje_completo_usuario,
+                        author=author
+                    )
+                    if resultado is None:
+                        return None, nuevo_state
+                    return ("Estás en el flujo de agendamiento. Elegí un turno de la lista anterior. \n"
+                            "Para salir, escribí: SALIR DE AGENDA"), nuevo_state
+                except Exception:
+                    return ("Estás en el flujo de agendamiento. Para salir, escribí: SALIR DE AGENDA"), state_context
+    except Exception as _e:
+        logger.warning(f"[BLINDAJE_EJECUTAR] No se pudo aplicar el guard de dominio: {_e}")
+
     try:
         # ¡LA CORRECCIÓN MÁS IMPORTANTE!
         # Pasamos los argumentos por nombre para asegurar que cada función reciba lo que necesita.
@@ -3686,6 +3739,28 @@ def process_message_logic(author, messages_to_process):
                 nuevo_contexto = state_context
 
         proximo_estado_sugerido = (nuevo_contexto or {}).get('current_state') or (estrategia or {}).get('proximo_estado_sugerido')
+        # BLINDAJE DE COMMIT DE ESTADO: no salir de flujos sin comando explícito
+        try:
+            current_state_local = (state_context or {}).get('current_state', '') or ''
+            texto_usuario_uc = (mensaje_completo_usuario or '').upper()
+            if current_state_local.startswith('PAGOS_'):
+                if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('PAGOS_'):
+                    # Solo permitimos salir a 'conversando' con comando explícito
+                    if proximo_estado_sugerido == 'conversando' and ('SALIR DE PAGO' in texto_usuario_uc):
+                        pass
+                    else:
+                        logger.info(f"[BLINDAJE_ESTADO] Ignorando cambio de estado fuera de PAGOS desde '{current_state_local}' a '{proximo_estado_sugerido}' sin 'SALIR DE PAGO'")
+                        proximo_estado_sugerido = None
+            elif current_state_local.startswith('AGENDA_'):
+                if proximo_estado_sugerido and not proximo_estado_sugerido.startswith('AGENDA_'):
+                    if proximo_estado_sugerido == 'conversando' and ('SALIR DE AGENDA' in texto_usuario_uc):
+                        pass
+                    else:
+                        logger.info(f"[BLINDAJE_ESTADO] Ignorando cambio de estado fuera de AGENDA desde '{current_state_local}' a '{proximo_estado_sugerido}' sin 'SALIR DE AGENDA'")
+                        proximo_estado_sugerido = None
+        except Exception as _e:
+            logger.warning(f"[BLINDAJE_ESTADO] No se pudo evaluar el guard de estado: {_e}")
+
         if proximo_estado_sugerido and proximo_estado_sugerido != current_state:
             logger.info(f"[ESTADO] Actualizando estado de '{current_state}' a '{proximo_estado_sugerido}'")
             memory.update_conversation_state(author, proximo_estado_sugerido, context=_clean_context_for_firestore(nuevo_contexto))
