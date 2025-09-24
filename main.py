@@ -840,7 +840,8 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
             'preguntar',
             'iniciar_agendamiento', 'iniciar_triage_agendamiento', 'mostrar_opciones_turnos',
             'seleccionar_turno', 'confirmar_turno', 'reprogramar', 'cancelar',
-            'confirmar_cancelacion', 'reanudar_flujo_anterior', 'salir_de_agenda', 'volver_agente_cero'
+            'confirmar_cancelacion', 'reanudar_flujo_anterior', 'salir_de_agenda', 'volver_agente_cero',
+            'finalizar_cita_automatico', 'iniciar_reprogramacion_cita', 'ejecutar_reprogramacion_cita'
         }
         if current_state_local.startswith('PAGOS_'):
             if accion_limpia not in acciones_permitidas_pagos:
@@ -881,6 +882,19 @@ def _ejecutar_accion(accion, history, detalles, state_context, mensaje_completo_
     try:
         # ¡LA CORRECCIÓN MÁS IMPORTANTE!
         # Pasamos los argumentos por nombre para asegurar que cada función reciba lo que necesita.
+        # GUARDIA DE REPROGRAMACIÓN: Solo si existe un turno confirmado
+        try:
+            if accion in ("iniciar_reprogramacion_cita", "ejecutar_reprogramacion_cita"):
+                from memory import obtener_ultimo_turno_confirmado
+                _author_guard = author or ((state_context or {}).get('author'))
+                ultimo_turno = obtener_ultimo_turno_confirmado(_author_guard) if _author_guard else None
+                if not ultimo_turno:
+                    logger.info("[REPROG_GUARD] Sin turno confirmado. Redirigiendo a iniciar_triage_agendamiento")
+                    accion = "iniciar_triage_agendamiento"
+                    detalles = (detalles or {})
+                    detalles['motivo'] = 'sin_turno_para_reprogramar'
+        except Exception as _e:
+            logger.warning(f"[REPROG_GUARD] No se pudo verificar turno confirmado: {_e}")
         respuesta_final, nuevo_contexto = MAPA_DE_ACCIONES[accion](
             history=history, 
             detalles=detalles, 

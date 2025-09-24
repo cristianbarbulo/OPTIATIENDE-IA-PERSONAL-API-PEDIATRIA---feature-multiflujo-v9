@@ -529,6 +529,16 @@ def llamar_meta_agente(mensaje_usuario, history, current_state=None):
             "accion_recomendada": "iniciar_triage_agendamiento"
         }
     
+    # Reprogramación (solo si hay turno registrado) - detección estricta
+    if "quiero reprogramar" in texto_lower:
+        logger.info("[META_AGENTE] ✅ Comando QUIERO REPROGRAMAR detectado")
+        return {
+            "decision": "REPROGRAMACION",
+            "dominio": "AGENDAMIENTO",
+            "datos_extraidos": _extraer_datos_agendamiento(texto_usuario),
+            "accion_recomendada": "iniciar_reprogramacion_cita"
+        }
+    
     # V10: entrada EXPLÍCITA estricta (solo frases exactas)
     if any(cmd in texto_lower for cmd in ["quiero pagar"]):
         logger.info("[META_AGENTE] ✅ Comando QUIERO PAGAR detectado")

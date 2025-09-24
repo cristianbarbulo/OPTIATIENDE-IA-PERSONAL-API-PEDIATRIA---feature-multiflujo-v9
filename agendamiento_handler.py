@@ -433,19 +433,21 @@ def iniciar_reprogramacion_cita(history, detalles, state_context=None, mensaje_c
         return mostrar_opciones_turnos_reprogramacion(history, detalles, state_context, mensaje_completo_usuario)
     
     else:
-        # Si no encuentra turno, decir que no encontró pero no hay problema y iniciar el ciclo de agendamiento normal
-        logger.info(f"[REPROGRAMACION] No se encontró turno confirmado para {author}. Iniciando ciclo de agendamiento normal.")
+        # Si no encuentra turno, educar y ofrecer entrada clara a agendamiento
+        logger.info(f"[REPROGRAMACION] No se encontró turno confirmado para {author}. Educando para agendar.")
         
-        mensaje = f"No encontré una cita confirmada para reprogramar, pero no hay problema. Vamos a agendar una nueva cita para ti."
-        
-        # Limpiar contexto de reprogramación y iniciar agendamiento normal
+        # Limpiar contexto de reprogramación
         if 'cita_original_reprogramar' in state_context:
             del state_context['cita_original_reprogramar']
         if 'es_reprogramacion' in state_context:
             del state_context['es_reprogramacion']
         
-        # Iniciar el ciclo de agendamiento normal
-        return iniciar_triage_agendamiento(history, detalles, state_context, mensaje_completo_usuario, author)
+        # Mensaje educativo estricto (no cambia a agendamiento sin frase)
+        mensaje = (
+            "No encontré una cita confirmada para reprogramar.\n"
+            f"Si querés agendar una nueva cita, escribí: {config.COMMAND_TIPS['ENTER_AGENDA']}"
+        )
+        return mensaje, state_context
 
 def confirmar_reprogramacion(history, state_context, user_choice):
     """
