@@ -11,11 +11,15 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Agentes opcionales ---
-# Carga los agentes habilitados desde las variables de entorno.
-# Ejemplo: ENABLED_AGENTS="payment,scheduling"
-ENABLED_AGENTS = [agent.strip().upper() for agent in os.environ.get('ENABLED_AGENTS', '').split(',') if agent.strip()]
-logger.info(f"Agentes habilitados para esta instancia: {ENABLED_AGENTS if ENABLED_AGENTS else 'Ninguno'}")
+# === BALLESTER ESPECÍFICO - SISTEMA ÚNICO ===
+# Como este sistema es ÚNICAMENTE para Centro Pediátrico Ballester,
+# configuramos directamente sin variables de entorno genéricas
+BALLESTER_MODE = True
+CLIENT_NAME = "Centro Pediátrico Ballester"
+
+# Agentes específicos Ballester (hardcodeado)
+ENABLED_AGENTS = ['BALLESTER_MEDICAL']  # Solo agente médico específico
+logger.info(f"Sistema configurado para: {CLIENT_NAME}")
 
 # --- Activadores opcionales ---
 # Carga los activadores (triggers) que cambian el estado de la conversación.
@@ -84,8 +88,47 @@ try:
         )
     )
     
-    # NUEVO: Prompt del Agente Cero (OBLIGATORIO)
-    PROMPT_AGENTE_CERO = os.environ['PROMPT_AGENTE_CERO']
+    # === PROMPTS BALLESTER HARDCODEADOS ===
+    # Como sistema único, hardcodeamos prompts específicos para mejor performance
+    PROMPT_AGENTE_CERO = """Eres el asistente virtual del Centro Pediátrico Ballester.
+
+🏥 **TU IDENTIDAD:**
+- Centro Pediátrico Ballester, Villa Ballester  
+- Especialista en atención pediátrica (0-18 años)
+- Conocimiento completo de obras sociales argentinas
+- Acceso directo al sistema OMNIA para turnos
+
+🎯 **COMANDOS MÉDICOS ESPECÍFICOS:**
+• **"QUIERO AGENDAR"** → Iniciar solicitud de turnos médicos
+• **"QUIERO CONSULTAR COBERTURA"** → Verificar cobertura de obra social
+• **"QUIERO CANCELAR"** → Cancelar turnos existentes
+• **"SALIR DE AGENDA"** → Salir del flujo de agendamiento
+
+🚨 **DETECCIÓN DE URGENCIAS:**
+Si mencionan: "urgencia", "urgente", "dolor", "fiebre alta", "hoy", "lo antes posible"
+→ Deriva INMEDIATAMENTE a teléfonos: 📞 4616-6870 ó 11-5697-5007
+
+🏥 **INFORMACIÓN CENTRO BALLESTER:**
+- **Horario:** Lunes a Viernes 9-13hs y 14-20hs
+- **Dirección:** Alvear 2307, Villa Ballester  
+- **Especialidades:** Neurología, Neumonología, Cardiología, Ecografías, EEG, etc.
+- **Obras Sociales:** IOMA, OSDE, MEDICARDIO, OMINT, PASTELEROS, y más
+
+🩺 **SERVICIOS PRINCIPALES:**
+- Consultas pediátricas generales
+- Neurología Infantil (lista de espera algunas obras sociales)
+- Estudios neurológicos (EEG, PEAT, Polisomnografía)
+- Ecografías con preparación específica por edad
+- Cardiología pediátrica
+- Salud mental (Psicología, Neuropsicología - particulares)
+
+💡 **RESPUESTA DUAL:**
+- **Texto conversacional médico** para consultas e información
+- **JSON con acción médica** para intenciones de agendamiento
+
+Ejemplo JSON: {"accion_recomendada": "iniciar_verificacion_medica", "detalles": {"servicio_detectado": "Neurología Infantil"}}
+
+🤝 **TONO:** Profesional médico, empático, tranquilizador. Recuerda que tratas con padres preocupados por la salud de sus hijos."""
     
     # NUEVO: Configuración para 360dialog (reemplaza MSG.IO)
     D360_API_KEY = os.environ['D360_API_KEY']
@@ -137,13 +180,37 @@ try:
     # Si hay cualquier agente habilitado, el prompt de intención es obligatorio.
     # (ELIMINADO: PROMPT_INTENCION ya no es requerido)
 
-    # Si el agente de PAGOS está habilitado, sus variables son obligatorias.
-    if 'PAYMENT' in ENABLED_AGENTS:
-        PROMPT_PAGO = os.environ['PROMPT_PAGO']  # Para personalizar mensaje de opciones de pago
-        MERCADOPAGO_TOKEN = os.environ['MERCADOPAGO_TOKEN']
-        # Estos son opcionales, por eso usamos .get()
-        MODO_TOKEN = os.environ.get('MODO_TOKEN')
-        PAYPAL_SECRET = os.environ.get('PAYPAL_SECRET')
+    # === CONFIGURACIÓN MÉDICA BALLESTER ===
+    # Como sistema único médico, configuramos directamente sin agentes genéricos
+    
+    # API de la clínica (reemplaza Google Calendar y servicios genéricos)
+    CLINICA_API_BASE = os.environ.get('CLINICA_API_BASE', 'https://api.clinicaballester.com/v1')
+    CLINICA_API_KEY = os.environ.get('CLINICA_API_KEY', '')
+    
+    # Configuración médica específica (hardcodeada)
+    BALLESTER_MEDICAL_CONFIG = {
+        'edad_maxima_pediatria': 18,
+        'duracion_turno_default_minutos': 30,
+        'anticipacion_minima_turnos_horas': 24,
+        'max_slots_neurologia_obra_social_dia': 5,
+        'max_slots_neumonologia_ioma_dia': 5,
+        'arancel_especial_dr_malacchia': 22500,
+        'edad_maxima_prunape_anos': 5,
+        'edad_maxima_prunape_meses': 11,
+        'edad_maxima_prunape_dias': 29
+    }
+    
+    # Contactos específicos Ballester
+    BALLESTER_CONTACTS = {
+        'staff_principal': os.environ.get('NOTIFICATION_CONTACT', ''),
+        'emergencias': ['4616-6870', '11-5697-5007'],
+        'direccion': 'Alvear 2307, Villa Ballester',
+        'horario': 'Lunes a Viernes 9-13hs y 14-20hs'
+    }
+    
+    # === ELIMINAMOS CONFIGURACIÓN DE PAGOS GENÉRICOS ===
+    # Ballester no usa el sistema de pagos genérico, usa verificación de obra social
+    # if 'PAYMENT' in ENABLED_AGENTS:  # COMENTADO - No se usa en Ballester
 
     # Si el agente de AGENDAMIENTO está habilitado, sus variables son obligatorias.
     # ELIMINADO: PROMPT_AGENDAMIENTO ya no se usa en el sistema

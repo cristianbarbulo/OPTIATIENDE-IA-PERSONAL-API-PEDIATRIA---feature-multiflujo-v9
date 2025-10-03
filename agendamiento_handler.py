@@ -36,11 +36,42 @@ APPOINTMENT_DURATION_MINUTES = 60
 
 def iniciar_triage_agendamiento(history, detalles, state_context=None, mensaje_completo_usuario=None, author=None):
     """
-    NUEVO: Función para iniciar el flujo de agendamiento con triage inteligente.
-    CORRECCIÓN CRÍTICA: Preservar información extraída por la IA sin limpiarla.
-    MEJORA CRÍTICA: Siempre mostrar lista de turnos directamente.
+    BALLESTER V11: Función adaptada para flujo médico específico.
+    REDIRIGE automáticamente al verification_handler para flujo médico completo.
     """
-    logger.info(f"[TRIAGE_AGENDA] Iniciando triage de agendamiento para usuario")
+    logger.info(f"[BALLESTER_AGENDA] Redirigiendo a verificación médica Ballester")
+    
+    # ADAPTACIÓN BALLESTER: Redirigir a verificación médica específica
+    try:
+        # Importar módulos médicos específicos
+        import verification_handler
+        
+        # Inicializar contexto médico
+        context_medico = state_context.copy() if state_context else {}
+        context_medico['verification_state'] = 'IDENTIFICAR_PRACTICA'
+        context_medico['flow_start_time'] = datetime.now().isoformat()
+        
+        # Extraer servicio si viene en detalles
+        if detalles and detalles.get('servicio_detectado'):
+            context_medico['service_name'] = detalles['servicio_detectado']
+            context_medico['verification_state'] = 'IDENTIFICAR_PACIENTE'
+        
+        # Procesar con verificación médica
+        orchestrator = verification_handler.MedicalVerificationOrchestrator()
+        resultado_medico = orchestrator.process_medical_flow(
+            mensaje_completo_usuario or "", context_medico, author
+        )
+        
+        if resultado_medico:
+            mensaje_respuesta, contexto_actualizado, botones = resultado_medico
+            return mensaje_respuesta, contexto_actualizado
+        else:
+            # Fallback al sistema original
+            logger.warning("[BALLESTER_AGENDA] Fallback al sistema original")
+            
+    except Exception as e:
+        logger.error(f"[BALLESTER_AGENDA] Error en verificación médica: {e}")
+        # Fallback al sistema original
     
     # Asegurar que tenemos el contexto necesario
     if not state_context:
