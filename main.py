@@ -35,6 +35,13 @@ if 'PAYMENT' in config.ENABLED_AGENTS:
 if 'SCHEDULING' in config.ENABLED_AGENTS:
     import agendamiento_handler
 
+# === BALLESTER V11 MEDICAL SYSTEM (imports mínimos) ===
+try:
+    import verification_handler  # Orquestador médico V11
+    BALLESTER_V11_ENABLED = True
+except Exception:
+    BALLESTER_V11_ENABLED = False
+
 # Control de mensajes procesados para evitar duplicados y manejar reintentos tras reinicios
 # Diccionario: unique_key -> first_seen_epoch
 PROCESSED_MESSAGES = {}
@@ -1680,6 +1687,16 @@ MAPA_DE_ACCIONES = {
     "volver_agente_cero": wrapper_volver_agente_cero,
     "usar_agente_cero": wrapper_usar_agente_cero,
 }
+
+# === Acciones médicas Ballester V11 ===
+if BALLESTER_V11_ENABLED and 'verification_handler' in globals():
+    try:
+        MAPA_DE_ACCIONES.update({
+            "iniciar_verificacion_medica": verification_handler.start_medical_verification,
+            "continuar_verificacion_medica": verification_handler.start_medical_verification,
+        })
+    except Exception:
+        pass
 
 # --- AGREGAR DINÁMICAMENTE SEGÚN CONFIGURACIÓN ---
 # Solo agregar acciones de agendamiento si el módulo está habilitado Y importado
@@ -3638,6 +3655,56 @@ def process_message_logic(author, messages_to_process):
             memory.update_conversation_state(author, estado_a_persistir, context=_clean_context_for_firestore(state_context))
         except Exception as e:
             logger.error(f"[CONTACT_INFO] Error actualizando información de contacto: {e}")
+
+        # === BALLESTER V11: Derivación temprana al verificador médico ===
+        if BALLESTER_V11_ENABLED and 'verification_state' in (state_context or {}) and state_context.get('verification_state'):
+            try:
+                orchestrator = verification_handler.MedicalVerificationOrchestrator()
+                resultado_medico = orchestrator.process_medical_flow(mensaje_completo_usuario, state_context or {}, author)
+                if resultado_medico:
+                    mensaje_respuesta, contexto_actualizado, botones = resultado_medico
+                    if botones:
+                        msgio_handler.send_whatsapp_message(
+                            phone_number=author,
+                            message=mensaje_respuesta,
+                            options=[{"id": b.get("id", ""), "title": b.get("title", "")} for b in botones],
+                            list_title="Opciones",
+                            section_title="Seleccioná"
+                        )
+                    else:
+                        msgio_handler.send_whatsapp_message(phone_number=author, message=mensaje_respuesta)
+                    memory.update_conversation_state(author, contexto_actualizado.get('current_state', current_state), context=_clean_context_for_firestore(contexto_actualizado))
+                    return
+            except Exception as e:
+                logger.error(f"[MAIN] Error en derivación médica temprana: {e}")
+
+        # Inicio automático del flujo médico por intención
+        if BALLESTER_V11_ENABLED:
+            try:
+                texto_lower = (mensaje_completo_usuario or "").lower()
+                if any(k in texto_lower for k in [
+                    'quiero agendar', 'consultar cobertura', 'obra social', 'neurologia', 'ecografia', 'eeg', 'cardiologia'
+                ]):
+                    context_medico = (state_context or {}).copy()
+                    context_medico['verification_state'] = context_medico.get('verification_state') or 'IDENTIFICAR_PRACTICA'
+                    orchestrator = verification_handler.MedicalVerificationOrchestrator()
+                    resultado_medico = orchestrator.process_medical_flow(mensaje_completo_usuario, context_medico, author)
+                    if resultado_medico:
+                        mensaje_respuesta, contexto_actualizado, botones = resultado_medico
+                        if botones:
+                            msgio_handler.send_whatsapp_message(
+                                phone_number=author,
+                                message=mensaje_respuesta,
+                                options=[{"id": b.get("id", ""), "title": b.get("title", "")} for b in botones],
+                                list_title="Opciones",
+                                section_title="Seleccioná"
+                            )
+                        else:
+                            msgio_handler.send_whatsapp_message(phone_number=author, message=mensaje_respuesta)
+                        memory.update_conversation_state(author, contexto_actualizado.get('current_state', current_state), context=_clean_context_for_firestore(contexto_actualizado))
+                        return
+            except Exception as e:
+                logger.error(f"[MAIN] Error iniciando flujo médico: {e}")
 
         estrategia = None
         respuesta_final = None
