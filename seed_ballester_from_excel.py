@@ -26,12 +26,27 @@ Uso:
 import argparse
 import logging
 from typing import Dict, Any
+import os
 import pandas as pd
-from firebase_admin import firestore
-
-import memory  # garantiza inicialización de firebase
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Inicialización directa de Firebase (sin dependencia de memory/config)
+def initialize_firebase():
+    if not firebase_admin._apps:
+        cred_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if cred_path and os.path.exists(cred_path):
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+            logger.info(f"[FIREBASE] Inicializado con credentials: {cred_path}")
+        else:
+            # Intentar credenciales por defecto
+            firebase_admin.initialize_app()
+            logger.info("[FIREBASE] Inicializado con Application Default Credentials")
+    return firestore.client()
 logger.setLevel(logging.INFO)
 
 
@@ -154,14 +169,46 @@ def seed_preparaciones(db: firestore.Client, df: pd.DataFrame) -> None:
     logger.info(f"[SEED] Preparaciones → {len(data)} servicios")
 
 
+def seed_bono_contribucion(db: firestore.Client, df: pd.DataFrame) -> None:
+    """Importa/actualiza bonos de contribución en ballester_obras_sociales.
+
+    Columnas esperadas:
+    - obra_social, servicio_key, bono_contribucion
+    """
+    coll = db.collection('ballester_obras_sociales')
+    updated = 0
+    for _, row in df.iterrows():
+        obra = str(row.get('obra_social', '')).strip().upper()
+        svc = str(row.get('servicio_key', '')).strip()
+        if not obra or not svc:
+            continue
+        try:
+            bono = int(pd.to_numeric(row.get('bono_contribucion', 0), errors='coerce') or 0)
+        except Exception:
+            bono = 0
+        if bono <= 0:
+            continue
+        # Leer doc actual y mergear
+        doc_ref = coll.document(obra)
+        snap = doc_ref.get()
+        servicios = {}
+        if snap.exists:
+            data = snap.to_dict() or {}
+            servicios = data.get('servicios_cubiertos', {})
+        servicios.setdefault(svc, {})['bono_contribucion'] = bono
+        doc_ref.set({'nombre_completo': obra, 'servicios_cubiertos': servicios}, merge=True)
+        updated += 1
+    logger.info(f"[SEED] Bono contribución → filas actualizadas: {updated}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Seed Ballester V11 desde Excel a Firestore')
     parser.add_argument('--file', required=True, help='Ruta al Excel con datos (xlsx)')
     parser.add_argument('--tenant', default='CENTRO_PEDIATRICO_BALLESTER', help='Nombre del tenant (para logs)')
     args = parser.parse_args()
 
-    # Inicializa firestore usando memory.py
-    db = firestore.client()
+    # Inicializa firestore directamente
+    db = initialize_firebase()
     xls = pd.ExcelFile(args.file)
 
     # Coberturas
@@ -183,6 +230,11 @@ def main():
     df = _safe_sheet(xls, 'preparaciones')
     if df is not None and not df.empty:
         seed_preparaciones(db, df)
+
+    # Bono contribución (opcional)
+    df = _safe_sheet(xls, 'bono_contribucion')
+    if df is not None and not df.empty:
+        seed_bono_contribucion(db, df)
 
     logger.info('[SEED] ✅ Base de datos de prueba importada correctamente')
 
