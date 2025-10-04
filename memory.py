@@ -117,11 +117,93 @@ def _init_firebase_client() -> firestore.Client | None:
 
     Orden de intento:
     1) GOOGLE_CREDENTIALS_JSON (raw o base64) → credentials.Certificate
-    2) GOOGLE_APPLICATION_CREDENTIALS (ruta existente) → credentials.Certificate
+    2) GOOGLE_APPLICATION_CREDENTIALS (ruta existente o JSON inline) → credentials.Certificate
+    2.1) Auto-detector de Secret Files en /etc/secrets (Render) → credentials.Certificate
     3) Application Default Credentials → credentials.ApplicationDefault
     """
     try:
-        # 1) GOOGLE_CREDENTIALS_JSON: contenido inline del service account
+        # PREFERENCIA: archivo/secret file primero para evitar problemas de firmas viejas
+        # 1) GOOGLE_APPLICATION_CREDENTIALS: ruta a archivo en disco (o JSON inline)
+        creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        if creds_path:
+            try:
+                # Permitir que el env var traiga JSON directamente por error de configuración
+                if creds_path.strip().startswith('{'):
+                    creds_dict = json.loads(creds_path)
+                    # Normalizar saltos de línea en private_key si vienen escapados
+                    if isinstance(creds_dict.get('private_key'), str) and '\\n' in creds_dict['private_key']:
+                        creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
+                    cred = credentials.Certificate(creds_dict)
+                else:
+                    # Resolver rutas comunes de Secret Files en Render si la ruta no existe
+                    candidate_paths = [
+                        creds_path,
+                        os.path.join(os.getcwd(), creds_path),
+                        '/etc/secrets/GOOGLE_APPLICATION_CREDENTIALS',
+                        '/etc/secrets/firebase.json',
+                    ]
+                    resolved = None
+                    for p in candidate_paths:
+                        try:
+                            if p and os.path.exists(p):
+                                resolved = p
+                                break
+                        except Exception:
+                            continue
+                    if not resolved:
+                        raise FileNotFoundError(f"Ruta de credenciales no encontrada: {creds_path}")
+                    # Si es un archivo, cargar dict para normalizar private_key si fuese necesario
+                    try:
+                        with open(resolved, 'r', encoding='utf-8') as fh:
+                            file_txt = fh.read().strip()
+                        if file_txt.startswith('{'):
+                            file_dict = json.loads(file_txt)
+                            if isinstance(file_dict.get('private_key'), str) and '\\n' in file_dict['private_key']:
+                                file_dict['private_key'] = file_dict['private_key'].replace('\\n', '\n')
+                            cred = credentials.Certificate(file_dict)
+                        else:
+                            # Si no es JSON (poco probable), pasar path directamente
+                            cred = credentials.Certificate(resolved)
+                    except Exception:
+                        # Fallback conservador a path directo
+                        cred = credentials.Certificate(resolved)
+                if not firebase_admin._apps:
+                    firebase_admin.initialize_app(cred)
+                client = firestore.client()
+                logger.info("Firebase inicializado con GOOGLE_APPLICATION_CREDENTIALS (ruta).")
+                return client
+            except Exception as e:
+                logger.warning(f"No se pudo inicializar con GOOGLE_APPLICATION_CREDENTIALS: {e}")
+
+        # 1.1) Auto-detector de Secret Files en /etc/secrets (Render)
+        try:
+            secrets_dir = '/etc/secrets'
+            if os.path.isdir(secrets_dir):
+                # Priorizar nombres típicos
+                for fname in ['GOOGLE_APPLICATION_CREDENTIALS', 'firebase.json', 'service-account.json']:
+                    candidate = os.path.join(secrets_dir, fname)
+                    if os.path.exists(candidate):
+                        try:
+                            with open(candidate, 'r', encoding='utf-8') as fh:
+                                txt = fh.read().strip()
+                            if txt.startswith('{'):
+                                data = json.loads(txt)
+                                if isinstance(data.get('private_key'), str) and '\\n' in data['private_key']:
+                                    data['private_key'] = data['private_key'].replace('\\n', '\n')
+                                cred = credentials.Certificate(data)
+                            else:
+                                cred = credentials.Certificate(candidate)
+                            if not firebase_admin._apps:
+                                firebase_admin.initialize_app(cred)
+                            client = firestore.client()
+                            logger.info(f"Firebase inicializado con Secret File: {candidate}")
+                            return client
+                        except Exception as se:
+                            logger.warning(f"Secret file detectado pero inválido ({candidate}): {se}")
+        except Exception:
+            pass
+
+        # 2) GOOGLE_CREDENTIALS_JSON: contenido inline del service account (fallback)
         creds_json_env = os.getenv('GOOGLE_CREDENTIALS_JSON')
         if creds_json_env:
             try:
@@ -131,6 +213,9 @@ def _init_firebase_client() -> firestore.Client | None:
                 else:
                     decoded = base64.b64decode(creds_json_env).decode('utf-8')
                     creds_dict = json.loads(decoded)
+                # Normalizar private_key si vino con \n escapado
+                if isinstance(creds_dict.get('private_key'), str) and '\\n' in creds_dict['private_key']:
+                    creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
                 cred = credentials.Certificate(creds_dict)
                 if not firebase_admin._apps:
                     firebase_admin.initialize_app(cred)
@@ -139,29 +224,6 @@ def _init_firebase_client() -> firestore.Client | None:
                 return client
             except Exception as e:
                 logger.warning(f"No se pudo inicializar con GOOGLE_CREDENTIALS_JSON: {e}")
-
-        # 2) GOOGLE_APPLICATION_CREDENTIALS: ruta a archivo en disco
-        creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if creds_path:
-            try:
-                # Permitir que el env var traiga JSON directamente por error de configuración
-                if creds_path.strip().startswith('{'):
-                    creds_dict = json.loads(creds_path)
-                    cred = credentials.Certificate(creds_dict)
-                else:
-                    if not os.path.exists(creds_path):
-                        # Intento alternativo: usar valor por defecto si existe en el repo
-                        default_path = os.path.join(os.getcwd(), creds_path)
-                        if os.path.exists(default_path):
-                            creds_path = default_path
-                    cred = credentials.Certificate(creds_path)
-                if not firebase_admin._apps:
-                    firebase_admin.initialize_app(cred)
-                client = firestore.client()
-                logger.info("Firebase inicializado con GOOGLE_APPLICATION_CREDENTIALS (ruta).")
-                return client
-            except Exception as e:
-                logger.warning(f"No se pudo inicializar con GOOGLE_APPLICATION_CREDENTIALS: {e}")
 
         # 3) Application Default Credentials (ADC)
         if not firebase_admin._apps:
